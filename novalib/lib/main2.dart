@@ -843,6 +843,22 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  void _showNotifications() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Notifications"),
+        content: const Text("No new notifications."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("OK"),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -864,6 +880,13 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text("NovaLib"),
         backgroundColor: Theme.of(context).colorScheme.surface,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.notifications_none),
+            tooltip: "Notifications",
+            onPressed: _showNotifications,
+          ),
+        ],
       ),
       body: RefreshIndicator(
         onRefresh: _loadData,
@@ -891,7 +914,9 @@ class _HomePageState extends State<HomePage> {
                   hintText: "Search books...",
                   prefixIcon: const Icon(Icons.search),
                   filled: true,
-                  fillColor: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
+                  fillColor: Theme.of(
+                    context,
+                  ).colorScheme.surfaceVariant.withOpacity(0.5),
                   contentPadding: const EdgeInsets.symmetric(
                     vertical: 0,
                     horizontal: 16,
