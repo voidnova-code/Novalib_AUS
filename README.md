@@ -113,7 +113,7 @@ flutter run
 
 <section>
   <h2>Contact</h2>
-  <p>For questions or feedback, please contact <a href="mailto:your.email@example.com">your.email@example.com</a></p>
+  <p>For questions or feedback, please contact <a href="mailto:sayankumarr02@gmail.com">your.email@example.com</a></p>
 </section>
 
 <footer>
