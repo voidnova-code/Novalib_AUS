@@ -65,7 +65,7 @@ Library management system for Assam university silcher(AUS)
 
 <header>
   <h1>NovaLib</h1>
-  <p>Library Management Mobile Application</p>
+  <p>Library Management Mobile Application for AUS (Assam University silchar)</p>
 </header>
 
 <section>
