@@ -94,7 +94,7 @@ python manage.py runserver http://192.168.150.28:8000
   </pre>
   <p><strong>Flutter app setup:</strong></p>
   <pre>
-cd novalib_testserver
+cd novalib
 flutter pub get
 flutter run
   </pre>
