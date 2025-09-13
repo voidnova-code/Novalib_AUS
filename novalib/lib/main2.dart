@@ -798,17 +798,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _onSearchChanged(String query) {
-    setState(() {
-      _filteredBooks = AppData.catalogBooks
-          .where(
-            (book) =>
-                book.title.toLowerCase().contains(query.toLowerCase()) ||
-                book.author.toLowerCase().contains(query.toLowerCase()),
-          )
-          .toList();
-    });
-  }
+  // Removed unused _onSearchChanged method
 
   Future<void> _issueBook() async {
     String? isbn = await Navigator.push<String>(
@@ -890,14 +880,18 @@ class _HomePageState extends State<HomePage> {
               ),
               const SizedBox(height: 12),
               TextField(
-                onChanged: _onSearchChanged,
+                readOnly: true,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const SearchPage()),
+                  );
+                },
                 decoration: InputDecoration(
                   hintText: "Search books...",
                   prefixIcon: const Icon(Icons.search),
                   filled: true,
-                  fillColor: Theme.of(
-                    context,
-                  ).colorScheme.surfaceVariant.withOpacity(0.5),
+                  fillColor: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.5),
                   contentPadding: const EdgeInsets.symmetric(
                     vertical: 0,
                     horizontal: 16,
