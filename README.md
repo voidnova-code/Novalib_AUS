@@ -65,7 +65,7 @@ Library management system for Assam university silcher(AUS)
 
 <header>
   <h1>NovaLib</h1>
-  <p>Library Management Mobile Application</p>
+  <p>Library Management Mobile Application for AUS (Assam University silchar)</p>
 </header>
 
 <section>
@@ -83,19 +83,18 @@ Library management system for Assam university silcher(AUS)
   <h2>Getting Started</h2>
   <p>Clone the repository and follow these commands to set up the backend and the Flutter app:</p>
   <pre>
-git clone https://github.com/your-username/novalib.git
+git clone https://github.com/voidnova-code/Novalib_AUS.git
 cd novalib
   </pre>
   <p><strong>Backend setup:</strong></p>
   <pre>
 cd backend
-pip install -r requirements.txt
 python manage.py migrate
-python manage.py runserver
+python manage.py runserver http://192.168.150.28:8000
   </pre>
   <p><strong>Flutter app setup:</strong></p>
   <pre>
-cd ../flutter_app
+cd novalib
 flutter pub get
 flutter run
   </pre>
@@ -114,7 +113,7 @@ flutter run
 
 <section>
   <h2>Contact</h2>
-  <p>For questions or feedback, please contact <a href="mailto:your.email@example.com">your.email@example.com</a></p>
+  <p>For questions or feedback, please contact <a href="mailto:sayankumarr02@gmail.com">your.email@example.com</a></p>
 </section>
 
 <footer>
