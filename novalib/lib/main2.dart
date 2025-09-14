@@ -1535,14 +1535,23 @@ class IssuedBooksPage extends StatefulWidget {
   State<IssuedBooksPage> createState() => _IssuedBooksPageState();
 }
 
-class _IssuedBooksPageState extends State<IssuedBooksPage> {
+class _IssuedBooksPageState extends State<IssuedBooksPage>
+    with SingleTickerProviderStateMixin {
   late List<Book> _issuedBooks;
   bool _isLoading = true;
+  late TabController _tabController;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _loadIssuedBooks();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadIssuedBooks() async {
@@ -1621,116 +1630,160 @@ class _IssuedBooksPageState extends State<IssuedBooksPage> {
     }
   }
 
+  Widget _buildReturnTab() {
+    final books = _issuedBooks;
+    return ListView.builder(
+      itemCount: books.length,
+      itemBuilder: (context, index) {
+        final book = books[index];
+        if (book.dueDate == null) return const SizedBox.shrink();
+        final daysLeft = book.dueDate!.difference(DateTime.now()).inDays;
+        Color statusColor;
+        String statusText;
+        if (daysLeft < 0) {
+          statusColor = Colors.red;
+          statusText = "Overdue";
+        } else if (daysLeft <= 3) {
+          statusColor = Colors.orange;
+          statusText = "$daysLeft days left";
+        } else {
+          statusColor = Colors.green;
+          statusText = "$daysLeft days left";
+        }
+        return Card(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          margin: const EdgeInsets.only(bottom: 12),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  book.title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                Text(book.author, style: const TextStyle(color: Colors.grey)),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Chip(
+                      label: Text(
+                        book.fine > 0
+                            ? "Fine: ₹${book.fine.toStringAsFixed(0)}"
+                            : statusText,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      backgroundColor: book.fine > 0 ? Colors.red : statusColor,
+                    ),
+                    TextButton(
+                      onPressed: () => _returnBook(book),
+                      child: const Text("Return"),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildRenewTab() {
+    final books = _issuedBooks.where((b) => b.canRenew).toList();
+    return ListView.builder(
+      itemCount: books.length,
+      itemBuilder: (context, index) {
+        final book = books[index];
+        if (book.dueDate == null) return const SizedBox.shrink();
+        final daysLeft = book.dueDate!.difference(DateTime.now()).inDays;
+        Color statusColor;
+        String statusText;
+        if (daysLeft < 0) {
+          statusColor = Colors.red;
+          statusText = "Overdue";
+        } else if (daysLeft <= 3) {
+          statusColor = Colors.orange;
+          statusText = "$daysLeft days left";
+        } else {
+          statusColor = Colors.green;
+          statusText = "$daysLeft days left";
+        }
+        return Card(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          margin: const EdgeInsets.only(bottom: 12),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  book.title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                Text(book.author, style: const TextStyle(color: Colors.grey)),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Chip(
+                      label: Text(
+                        book.fine > 0
+                            ? "Fine: ₹${book.fine.toStringAsFixed(0)}"
+                            : statusText,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      backgroundColor: book.fine > 0 ? Colors.red : statusColor,
+                    ),
+                    TextButton(
+                      onPressed: () => _renewBook(book),
+                      child: const Text("Renew"),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text("Issued Books"), centerTitle: true),
+      appBar: AppBar(
+        title: const Text("Issued Books"),
+        centerTitle: true,
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: "Return Book"),
+            Tab(text: "Renew Book"),
+          ],
+        ),
+      ),
       body: RefreshIndicator(
         onRefresh: _loadIssuedBooks,
         child: Padding(
           padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              const SizedBox(height: 20),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: _issuedBooks.length,
-                  itemBuilder: (context, index) {
-                    final book = _issuedBooks[index];
-                    if (book.dueDate == null) return const SizedBox.shrink();
-
-                    final daysLeft = book.dueDate!
-                        .difference(DateTime.now())
-                        .inDays;
-
-                    Color statusColor;
-                    String statusText;
-
-                    if (daysLeft < 0) {
-                      statusColor = Colors.red;
-                      statusText = "Overdue";
-                    } else if (daysLeft <= 3) {
-                      statusColor = Colors.orange;
-                      statusText = "$daysLeft days left";
-                    } else {
-                      statusColor = Colors.green;
-                      statusText = "$daysLeft days left";
-                    }
-
-                    return Card(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              book.title,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
-                            Text(
-                              book.author,
-                              style: const TextStyle(color: Colors.grey),
-                            ),
-                            const SizedBox(height: 8),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Chip(
-                                  label: Text(
-                                    book.fine > 0
-                                        ? "Fine: ₹${book.fine.toStringAsFixed(0)}"
-                                        : statusText,
-                                    style: const TextStyle(color: Colors.white),
-                                  ),
-                                  backgroundColor: book.fine > 0
-                                      ? Colors.red
-                                      : statusColor,
-                                ),
-                                Row(
-                                  children: [
-                                    TextButton(
-                                      onPressed: book.canRenew
-                                          ? () => _renewBook(book)
-                                          : null,
-                                      child: Text(
-                                        book.canRenew
-                                            ? "Renew"
-                                            : "Already Renewed",
-                                        style: TextStyle(
-                                          color: book.canRenew
-                                              ? Theme.of(
-                                                  context,
-                                                ).colorScheme.primary
-                                              : Colors.grey,
-                                        ),
-                                      ),
-                                    ),
-                                    TextButton(
-                                      onPressed: () => _returnBook(book),
-                                      child: const Text("Return"),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
+          child: TabBarView(
+            controller: _tabController,
+            children: [_buildReturnTab(), _buildRenewTab()],
           ),
         ),
       ),
@@ -1787,6 +1840,7 @@ class _PayFinePageState extends State<PayFinePage> {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(15),
             ),
+            margin: const EdgeInsets.all(10),
           ),
         );
       } else {
