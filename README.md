@@ -88,7 +88,7 @@ cd novalib
   </pre>
   <p><strong>Backend setup:</strong></p>
   <pre>
-cd backend
+cd novalib_testserver
 python manage.py migrate
 python manage.py runserver http://192.168.150.28:8000
   </pre>
