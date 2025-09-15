@@ -1,18 +1,5 @@
 import os
 from pathlib import Path
-import os
-from dotenv import load_dotenv
-
-load_dotenv(r"C:\Users\sayan\Desktop\NovaLiB\novalib_testserver\secutity.env")
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-# Media files (profile pictures, etc.)
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
-import os
-from pathlib import Path
-import os
 from dotenv import load_dotenv
 
 load_dotenv("C:\\Users\\sayan\\Desktop\\NovaLiB\\novalib_testserver\\secutity.env")
@@ -22,7 +9,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-your-secret-key-here'
 
 DEBUG = True
-
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 # Add your network IP to ALLOWED_HOSTS
 ALLOWED_HOSTS = ['192.168.166.130', 'localhost', '127.0.0.1', '*']
 
