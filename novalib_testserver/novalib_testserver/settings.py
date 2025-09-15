@@ -1,16 +1,20 @@
 import os
 from pathlib import Path
+import os
 from dotenv import load_dotenv
 
-load_dotenv("C:\\Users\\sayan\\Desktop\\NovaLiB\\novalib_testserver\\secutity.env")
+load_dotenv("C:\\Users\\sayan\\Desktop\\Novalib_AUS\\novalib_testserver\\secutity.env")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+MEDIA_URL = '/media/'
+
+MEDIA_ROOT = BASE_DIR / 'media'
 
 SECRET_KEY = 'django-insecure-your-secret-key-here'
 
 DEBUG = True
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+
 # Add your network IP to ALLOWED_HOSTS
 ALLOWED_HOSTS = ['192.168.166.130', 'localhost', '127.0.0.1', '*']
 
@@ -62,7 +66,7 @@ DATABASES = {
         'NAME': os.getenv("KOHA_DB_NAME"),  # database name
         'USER': os.getenv("KOHA_DB_USER"),        # root user
         'PASSWORD': os.getenv("KOHA_DB_PASS"),    # SQL password
-        'HOST':  os.getenv("KOHA_DB_HOST"),          # localhost
+        'HOST':  "localhost",          # localhost
         'PORT': '3306',
         'OPTIONS': {
             'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
