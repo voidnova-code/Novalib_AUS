@@ -253,6 +253,7 @@ class User {
   final String name;
   final String email;
   final String phone;
+  final String department; // <-- Add department
   final String? profileImageUrl;
 
   User({
@@ -260,6 +261,7 @@ class User {
     required this.name,
     required this.email,
     required this.phone,
+    required this.department, // <-- Add department
     this.profileImageUrl,
   });
 
@@ -269,6 +271,7 @@ class User {
       name: json['name'] ?? '',
       email: json['email'] ?? '',
       phone: json['phone'] ?? '',
+      department: json['department'] ?? '', // <-- Add department
       profileImageUrl: json['profile_image_url'],
     );
   }
@@ -296,6 +299,10 @@ class AppData {
         await prefs.setString('user_name', user.name);
         await prefs.setString('user_email', user.email);
         await prefs.setString('user_phone', user.phone);
+        await prefs.setString(
+          'user_department',
+          user.department,
+        ); // <-- Add department
         if (user.profileImageUrl != null) {
           await prefs.setString('profile_image_url', user.profileImageUrl!);
         }
@@ -320,6 +327,10 @@ class AppData {
     await prefs.setString('user_name', user.name);
     await prefs.setString('user_email', user.email);
     await prefs.setString('user_phone', user.phone);
+    await prefs.setString(
+      'user_department',
+      user.department,
+    ); // <-- Add department
   }
 
   static Future<void> saveStudentId(String id) async {
@@ -2052,6 +2063,7 @@ class _ProfilePageState extends State<ProfilePage> {
             name: AppData.currentUser!.name,
             email: AppData.currentUser!.email,
             phone: AppData.currentUser!.phone,
+            department: AppData.currentUser!.department,
             profileImageUrl: imageUrl,
           );
         });
@@ -2073,6 +2085,9 @@ class _ProfilePageState extends State<ProfilePage> {
     final emailController = TextEditingController(
       text: AppData.currentUser?.email ?? '',
     );
+    final departmentController = TextEditingController(
+      text: AppData.currentUser?.department ?? '',
+    ); // <-- Add department
     final result = await showDialog<Map<String, String>>(
       context: context,
       builder: (context) => AlertDialog(
@@ -2089,6 +2104,11 @@ class _ProfilePageState extends State<ProfilePage> {
               controller: emailController,
               decoration: const InputDecoration(labelText: "Email"),
             ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: departmentController,
+              decoration: const InputDecoration(labelText: "Department"),
+            ),
           ],
         ),
         actions: [
@@ -2100,6 +2120,7 @@ class _ProfilePageState extends State<ProfilePage> {
             onPressed: () => Navigator.pop(context, {
               'name': nameController.text,
               'email': emailController.text,
+              'department': departmentController.text,
             }),
             child: const Text("Save"),
           ),
@@ -2112,6 +2133,7 @@ class _ProfilePageState extends State<ProfilePage> {
           AppData.studentId!,
           result['name']!,
           result['email']!,
+          // You may need to update your backend to accept department
         );
 
         if (success) {
@@ -2120,6 +2142,8 @@ class _ProfilePageState extends State<ProfilePage> {
             name: result['name']!,
             email: result['email']!,
             phone: AppData.currentUser!.phone,
+            department: result['department']!, // <-- Add department
+            profileImageUrl: AppData.currentUser!.profileImageUrl,
           );
 
           await AppData.saveUserData(updatedUser);
@@ -2238,6 +2262,15 @@ class _ProfilePageState extends State<ProfilePage> {
                   leading: const Icon(Icons.phone_rounded),
                   title: const Text("Phone"),
                   subtitle: Text(AppData.currentUser?.phone ?? "N/A"),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                ListTile(
+                  leading: const Icon(Icons.school_rounded),
+                  title: const Text("Department"),
+                  subtitle: Text(AppData.currentUser?.department ?? "N/A"),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(15),
                   ),
@@ -2526,6 +2559,7 @@ class _WishlistPageState extends State<WishlistPage> {
                           fit: BoxFit.cover,
                         ),
                       ),
+
                       title: Text(
                         book.title,
                         style: const TextStyle(fontWeight: FontWeight.bold),
