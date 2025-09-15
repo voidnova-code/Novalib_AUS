@@ -66,7 +66,7 @@ DATABASES = {
         'NAME': os.getenv("KOHA_DB_NAME"),  # database name
         'USER': os.getenv("KOHA_DB_USER"),        # root user
         'PASSWORD': os.getenv("KOHA_DB_PASS"),    # SQL password
-        'HOST':  "localhost",          # localhost
+        'HOST':  os.getenv("KOHA_DB_HOST"),          # localhost
         'PORT': '3306',
         'OPTIONS': {
             'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
