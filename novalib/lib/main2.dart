@@ -7,6 +7,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
+import 'package:url_launcher/url_launcher.dart'; // Add this import
 
 // ========== 1. API SERVICE ==========
 // Handles all communication with the Django backend.
@@ -1838,34 +1839,7 @@ class _PayFinePageState extends State<PayFinePage> {
     }
   }
 
-  void _payFine() async {
-    try {
-      final success = await ApiService.payFine(AppData.studentId!, totalFine);
-      if (success) {
-        await _loadFineData();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text("Payment Successful!"),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(15),
-            ),
-            margin: const EdgeInsets.all(10),
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text("Payment failed.")));
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Error: $e")));
-    }
-  }
-
+  // Fix: _showPaymentDialog should launch SBI Collect link
   void _showPaymentDialog(BuildContext context, double totalFine) {
     showDialog(
       context: context,
@@ -1885,9 +1859,21 @@ class _PayFinePageState extends State<PayFinePage> {
             ),
             FilledButton(
               child: const Text("Pay Now"),
-              onPressed: () {
+              onPressed: () async {
                 Navigator.of(context).pop();
-                _payFine();
+                const url = 'https://www.onlinesbi.sbi/sbicollect';
+                if (await canLaunchUrl(Uri.parse(url))) {
+                  await launchUrl(
+                    Uri.parse(url),
+                    mode: LaunchMode.externalApplication,
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Could not open payment link"),
+                    ),
+                  );
+                }
               },
             ),
           ],
@@ -1915,6 +1901,31 @@ class _PayFinePageState extends State<PayFinePage> {
             children: [
               SizedBox(height: 200, child: FineHistoryChart()),
               const SizedBox(height: 20),
+              // Add the payment instruction image here
+              Card(
+                elevation: 2,
+                margin: const EdgeInsets.only(bottom: 16),
+                child: Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Column(
+                    children: [
+                      Text(
+                        "Steps for Library Payment through SBI Collect",
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      // Add the image from your assets folder
+                      Image.asset(
+                        'assets/sbi_collect_steps.jpg', // Save the provided image as sbi_collect_steps.jpg in assets
+                        fit: BoxFit.contain,
+                        height: 320,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               Expanded(
                 child: overdueBooks.isEmpty
                     ? const Center(
@@ -2540,6 +2551,7 @@ class _WishlistPageState extends State<WishlistPage> {
               )
             : ListView.builder(
                 itemCount: AppData.wishlistBooks.length,
+
                 itemBuilder: (context, index) {
                   final book = AppData.wishlistBooks[index];
                   return Card(
