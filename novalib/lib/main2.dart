@@ -1971,104 +1971,108 @@ class _PayFinePageState extends State<PayFinePage> {
       ),
       body: RefreshIndicator(
         onRefresh: _loadFineData,
-        child: Padding(
+        child: ListView(
           padding: const EdgeInsets.all(20.0),
-          child: Column(
-            children: [
-              SizedBox(height: 200, child: FineHistoryChart()),
-              const SizedBox(height: 20),
-              // Add the payment instruction image here
-              Card(
-                elevation: 2,
-                margin: const EdgeInsets.only(bottom: 16),
-                child: Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Column(
-                    children: [
-                      Text(
-                        "Steps for Library Payment through SBI Collect",
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.center,
+          children: [
+            SizedBox(height: 200, child: FineHistoryChart()),
+            const SizedBox(height: 20),
+            Card(
+              elevation: 2,
+              margin: const EdgeInsets.only(bottom: 16),
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Column(
+                  children: [
+                    Text(
+                      "Steps for Library Payment through SBI Collect",
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
                       ),
-                      const SizedBox(height: 8),
-                      // Add the image from your assets folder
-                      Image.asset(
-                        'assets/sbi_collect_steps.jpg', // Save the provided image as sbi_collect_steps.jpg in assets
-                        fit: BoxFit.contain,
-                        height: 320,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              Expanded(
-                child: overdueBooks.isEmpty
-                    ? const Center(
-                        child: Text(
-                          "No outstanding fines!",
-                          style: TextStyle(fontSize: 18, color: Colors.green),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    // Fix: Use Image.asset with errorBuilder for better UI
+                    Image.asset(
+                      'assets/sbi_collect_steps.jpg',
+                      fit: BoxFit.contain,
+                      height: 320,
+                      errorBuilder: (context, error, stackTrace) => Container(
+                        height: 120,
+                        alignment: Alignment.center,
+                        child: const Text(
+                          "Payment instruction image not found.\nPlease add 'assets/sbi_collect_steps.jpg' to your assets.",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.red),
                         ),
-                      )
-                    : ListView.builder(
-                        itemCount: overdueBooks.length,
-                        itemBuilder: (context, index) {
-                          final book = overdueBooks[index];
-                          return Card(
-                            margin: const EdgeInsets.only(bottom: 15),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(15),
-                            ),
-                            child: ListTile(
-                              title: Text(book.title),
-                              subtitle: book.dueDate != null
-                                  ? Text(
-                                      "Overdue by ${-book.dueDate!.difference(DateTime.now()).inDays} days",
-                                    )
-                                  : const Text("Overdue"),
-                              trailing: Text(
-                                "₹${book.fine.toStringAsFixed(2)}",
-                                style: TextStyle(
-                                  color: Theme.of(context).colorScheme.error,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ),
-                          );
-                        },
                       ),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: totalFine > 0
-                      ? () => _showPaymentDialog(context, totalFine)
-                      : null,
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    backgroundColor: totalFine > 0
-                        ? Theme.of(context).colorScheme.primary
-                        : Colors.grey,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
+            ),
+            const SizedBox(height: 8),
+            overdueBooks.isEmpty
+                ? const Center(
+                    child: Text(
+                      "No due fines!",
+                      style: TextStyle(fontSize: 18, color: Colors.green),
                     ),
+                  )
+                : Column(
+                    children: overdueBooks.map((book) {
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 15),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        child: ListTile(
+                          title: Text(book.title),
+                          subtitle: book.dueDate != null
+                              ? Text(
+                                  "Overdue by ${-book.dueDate!.difference(DateTime.now()).inDays} days",
+                                )
+                              : const Text("Overdue"),
+                          trailing: Text(
+                            "₹${book.fine.toStringAsFixed(2)}",
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
                   ),
-                  child: Text(
-                    totalFine > 0
-                        ? "Pay Now (₹${totalFine.toStringAsFixed(2)})"
-                        : "No Fines to Pay",
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                    ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: totalFine > 0
+                    ? () => _showPaymentDialog(context, totalFine)
+                    : null,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  backgroundColor: totalFine > 0
+                      ? Theme.of(context).colorScheme.primary
+                      : Colors.grey,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                ),
+                child: Text(
+                  totalFine > 0
+                      ? "Pay Now (₹${totalFine.toStringAsFixed(2)})"
+                      : "No Fines to Pay",
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -2182,7 +2186,6 @@ class _ProfilePageState extends State<ProfilePage> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-
             TextField(
               controller: emailController,
               decoration: const InputDecoration(labelText: "Email"),
@@ -2240,8 +2243,9 @@ class _ProfilePageState extends State<ProfilePage> {
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Failed to update profile"),
-            backgroundColor: Colors.red,
+            const SnackBar(
+              content: Text("Failed to update profile"),
+              backgroundColor: Colors.red,
             ),
           );
         }
