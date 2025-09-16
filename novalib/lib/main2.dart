@@ -1553,6 +1553,10 @@ class _IssuedBooksPageState extends State<IssuedBooksPage>
   bool _isLoading = true;
   late TabController _tabController;
 
+  // Track selected books for return/renew
+  final Set<String> _selectedReturnBooks = {};
+  final Set<String> _selectedRenewBooks = {};
+
   @override
   void initState() {
     super.initState();
@@ -1644,131 +1648,203 @@ class _IssuedBooksPageState extends State<IssuedBooksPage>
 
   Widget _buildReturnTab() {
     final books = _issuedBooks;
-    return ListView.builder(
-      itemCount: books.length,
-      itemBuilder: (context, index) {
-        final book = books[index];
-        if (book.dueDate == null) return const SizedBox.shrink();
-        final daysLeft = book.dueDate!.difference(DateTime.now()).inDays;
-        Color statusColor;
-        String statusText;
-        if (daysLeft < 0) {
-          statusColor = Colors.red;
-          statusText = "Overdue";
-        } else if (daysLeft <= 3) {
-          statusColor = Colors.orange;
-          statusText = "$daysLeft days left";
-        } else {
-          statusColor = Colors.green;
-          statusText = "$daysLeft days left";
-        }
-        return Card(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          margin: const EdgeInsets.only(bottom: 12),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  book.title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
+    return Column(
+      children: [
+        Expanded(
+          child: ListView.builder(
+            itemCount: books.length,
+            itemBuilder: (context, index) {
+              final book = books[index];
+              if (book.dueDate == null) return const SizedBox.shrink();
+              final daysLeft = book.dueDate!.difference(DateTime.now()).inDays;
+              Color statusColor;
+              String statusText;
+              if (daysLeft < 0) {
+                statusColor = Colors.red;
+                statusText = "Overdue";
+              } else if (daysLeft <= 3) {
+                statusColor = Colors.orange;
+                statusText = "$daysLeft days left";
+              } else {
+                statusColor = Colors.green;
+                statusText = "$daysLeft days left";
+              }
+              return Card(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                margin: const EdgeInsets.only(bottom: 12),
+                child: ListTile(
+                  leading: Checkbox(
+                    value: _selectedReturnBooks.contains(book.isbn),
+                    onChanged: (checked) {
+                      setState(() {
+                        if (checked == true) {
+                          _selectedReturnBooks.add(book.isbn);
+                        } else {
+                          _selectedReturnBooks.remove(book.isbn);
+                        }
+                      });
+                    },
+                  ),
+                  title: Text(
+                    book.title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        book.author,
+                        style: const TextStyle(color: Colors.grey),
+                      ),
+                      const SizedBox(height: 8),
+                      Chip(
+                        label: Text(
+                          book.fine > 0
+                              ? "Fine: ₹${book.fine.toStringAsFixed(0)}"
+                              : statusText,
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                        backgroundColor: book.fine > 0
+                            ? Colors.red
+                            : statusColor,
+                      ),
+                    ],
+                  ),
+                  trailing: TextButton(
+                    onPressed: () => _returnBook(book),
+                    child: const Text("Return"),
                   ),
                 ),
-                Text(book.author, style: const TextStyle(color: Colors.grey)),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Chip(
-                      label: Text(
-                        book.fine > 0
-                            ? "Fine: ₹${book.fine.toStringAsFixed(0)}"
-                            : statusText,
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                      backgroundColor: book.fine > 0 ? Colors.red : statusColor,
-                    ),
-                    TextButton(
-                      onPressed: () => _returnBook(book),
-                      child: const Text("Return"),
-                    ),
-                  ],
-                ),
-              ],
+              );
+            },
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _selectedReturnBooks.isEmpty
+                  ? null
+                  : () async {
+                      for (final isbn in _selectedReturnBooks) {
+                        final book = books.firstWhere((b) => b.isbn == isbn);
+                        _returnBook(book);
+                      }
+                      _selectedReturnBooks.clear();
+                      await _loadIssuedBooks();
+                    },
+              child: const Text("Apply Changes"),
             ),
           ),
-        );
-      },
+        ),
+      ],
     );
   }
 
   Widget _buildRenewTab() {
     final books = _issuedBooks.where((b) => b.canRenew).toList();
-    return ListView.builder(
-      itemCount: books.length,
-      itemBuilder: (context, index) {
-        final book = books[index];
-        if (book.dueDate == null) return const SizedBox.shrink();
-        final daysLeft = book.dueDate!.difference(DateTime.now()).inDays;
-        Color statusColor;
-        String statusText;
-        if (daysLeft < 0) {
-          statusColor = Colors.red;
-          statusText = "Overdue";
-        } else if (daysLeft <= 3) {
-          statusColor = Colors.orange;
-          statusText = "$daysLeft days left";
-        } else {
-          statusColor = Colors.green;
-          statusText = "$daysLeft days left";
-        }
-        return Card(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          margin: const EdgeInsets.only(bottom: 12),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  book.title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
+    return Column(
+      children: [
+        Expanded(
+          child: ListView.builder(
+            itemCount: books.length,
+            itemBuilder: (context, index) {
+              final book = books[index];
+              if (book.dueDate == null) return const SizedBox.shrink();
+              final daysLeft = book.dueDate!.difference(DateTime.now()).inDays;
+              Color statusColor;
+              String statusText;
+              if (daysLeft < 0) {
+                statusColor = Colors.red;
+                statusText = "Overdue";
+              } else if (daysLeft <= 3) {
+                statusColor = Colors.orange;
+                statusText = "$daysLeft days left";
+              } else {
+                statusColor = Colors.green;
+                statusText = "$daysLeft days left";
+              }
+              return Card(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                margin: const EdgeInsets.only(bottom: 12),
+                child: ListTile(
+                  leading: Checkbox(
+                    value: _selectedRenewBooks.contains(book.isbn),
+                    onChanged: (checked) {
+                      setState(() {
+                        if (checked == true) {
+                          _selectedRenewBooks.add(book.isbn);
+                        } else {
+                          _selectedRenewBooks.remove(book.isbn);
+                        }
+                      });
+                    },
+                  ),
+                  title: Text(
+                    book.title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        book.author,
+                        style: const TextStyle(color: Colors.grey),
+                      ),
+                      const SizedBox(height: 8),
+                      Chip(
+                        label: Text(
+                          book.fine > 0
+                              ? "Fine: ₹${book.fine.toStringAsFixed(0)}"
+                              : statusText,
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                        backgroundColor: book.fine > 0
+                            ? Colors.red
+                            : statusColor,
+                      ),
+                    ],
+                  ),
+                  trailing: TextButton(
+                    onPressed: () => _renewBook(book),
+                    child: const Text("Renew"),
                   ),
                 ),
-                Text(book.author, style: const TextStyle(color: Colors.grey)),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Chip(
-                      label: Text(
-                        book.fine > 0
-                            ? "Fine: ₹${book.fine.toStringAsFixed(0)}"
-                            : statusText,
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                      backgroundColor: book.fine > 0 ? Colors.red : statusColor,
-                    ),
-                    TextButton(
-                      onPressed: () => _renewBook(book),
-                      child: const Text("Renew"),
-                    ),
-                  ],
-                ),
-              ],
+              );
+            },
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _selectedRenewBooks.isEmpty
+                  ? null
+                  : () async {
+                      for (final isbn in _selectedRenewBooks) {
+                        final book = books.firstWhere((b) => b.isbn == isbn);
+                        _renewBook(book);
+                      }
+                      _selectedRenewBooks.clear();
+                      await _loadIssuedBooks();
+                    },
+              child: const Text("Apply Changes"),
             ),
           ),
-        );
-      },
+        ),
+      ],
     );
   }
 
