@@ -464,6 +464,6 @@ def update_profile_picture(request):
     borrower.save()
 
     # Return a URL that can be served by Django's media endpoint
-    profile_picture_url = request.build_absolute_uri(f"/media/{file_path}")
+    profile_picture_url = request.build_absolute_uri(f"{file_path}")
 
     return Response({'message': 'Profile picture updated successfully', 'profile_picture_url': profile_picture_url}, status=status.HTTP_200_OK)
