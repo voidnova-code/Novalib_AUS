@@ -2182,11 +2182,7 @@ class _ProfilePageState extends State<ProfilePage> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(labelText: "Full Name"),
-            ),
-            const SizedBox(height: 16),
+
             TextField(
               controller: emailController,
               decoration: const InputDecoration(labelText: "Email"),
@@ -2244,7 +2240,9 @@ class _ProfilePageState extends State<ProfilePage> {
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Failed to update profile")),
+            const SnackBar(content: Text("Failed to update profile"),
+            backgroundColor: Colors.red,
+            ),
           );
         }
       } catch (e) {

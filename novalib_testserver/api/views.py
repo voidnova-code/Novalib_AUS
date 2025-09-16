@@ -453,11 +453,17 @@ def update_profile_picture(request):
         return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
     # Save image to media/profile_pictures/<cardnumber>.jpg
-    file_path = f"media/profile_pictures/{cardnumber}.jpg"
-    path = default_storage.save(file_path, ContentFile(image.read()))
+    file_path = f"profile_pictures/{cardnumber}.jpg"
+    full_path = os.path.join(file_path)
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    path = default_storage.save(full_path, ContentFile(image.read()))
 
-    # Save the path to the Borrowers model
+    # Save the relative path to the Borrowers model
     borrower.profile_picture = file_path
     borrower.save()
 
-    return Response({'message': 'Profile picture updated successfully', 'profile_picture_url': file_path}, status=status.HTTP_200_OK)
+    # Return a URL that can be served by Django's media endpoint
+    profile_picture_url = request.build_absolute_uri(f"/media/{file_path}")
+
+    return Response({'message': 'Profile picture updated successfully', 'profile_picture_url': profile_picture_url}, status=status.HTTP_200_OK)

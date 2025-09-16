@@ -8,8 +8,11 @@ load_dotenv("C:\\Users\\sayan\\Desktop\\Novalib_AUS\\novalib_testserver\\secutit
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 MEDIA_URL = '/media/'
-
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# Fix for double 'media/media' issue:
+# If you use default_storage.save('media/profile_pictures/xxx.jpg', ...) it will save to BASE_DIR/media/media/profile_pictures/xxx.jpg.
+# To avoid this, always use only 'profile_pictures/xxx.jpg' as the relative path.
 
 SECRET_KEY = 'django-insecure-your-secret-key-here'
 
