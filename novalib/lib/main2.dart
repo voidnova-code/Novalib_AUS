@@ -1974,8 +1974,51 @@ class _PayFinePageState extends State<PayFinePage> {
         child: ListView(
           padding: const EdgeInsets.all(20.0),
           children: [
-            SizedBox(height: 200, child: FineHistoryChart()),
-            const SizedBox(height: 20),
+            // Remove wave pattern chart and add fine summary UI
+            Card(
+              color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+              elevation: 0,
+              margin: const EdgeInsets.only(bottom: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  vertical: 24,
+                  horizontal: 16,
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      "Total Fine Due",
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      "₹${totalFine.toStringAsFixed(2)}",
+                      style: TextStyle(
+                        fontSize: 36,
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      totalFine > 0
+                          ? "Please pay your outstanding fines using SBI Collect."
+                          : "You have no fines to pay!",
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyMedium?.copyWith(color: Colors.grey[700]),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ),
             Card(
               elevation: 2,
               margin: const EdgeInsets.only(bottom: 16),
@@ -1991,7 +2034,6 @@ class _PayFinePageState extends State<PayFinePage> {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 8),
-                    // Fix: Use Image.asset with errorBuilder for better UI
                     Image.asset(
                       'assets/sbi_collect_steps.jpg',
                       fit: BoxFit.contain,
@@ -2074,42 +2116,6 @@ class _PayFinePageState extends State<PayFinePage> {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class FineHistoryChart extends StatelessWidget {
-  const FineHistoryChart({super.key});
-  @override
-  Widget build(BuildContext context) {
-    return LineChart(
-      LineChartData(
-        gridData: const FlGridData(show: false),
-        titlesData: const FlTitlesData(show: false),
-        borderData: FlBorderData(show: false),
-        lineBarsData: [
-          LineChartBarData(
-            spots: const [
-              FlSpot(0, 3),
-              FlSpot(2.6, 2),
-              FlSpot(4.9, 5),
-              FlSpot(6.8, 3.1),
-              FlSpot(8, 4),
-              FlSpot(9.5, 3),
-              FlSpot(11, 4),
-            ],
-            isCurved: true,
-            color: Theme.of(context).colorScheme.primary,
-            barWidth: 5,
-            isStrokeCapRound: true,
-            dotData: const FlDotData(show: false),
-            belowBarData: BarAreaData(
-              show: true,
-              color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
-            ),
-          ),
-        ],
       ),
     );
   }
