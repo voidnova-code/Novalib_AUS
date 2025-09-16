@@ -2008,7 +2008,7 @@ class _PayFinePageState extends State<PayFinePage> {
                     const SizedBox(height: 8),
                     Text(
                       totalFine > 0
-                          ? "Please pay your outstanding fines using SBI Collect."
+                          ? "Please pay your fines using SBI Collect."
                           : "You have no fines to pay!",
                       style: Theme.of(
                         context,
@@ -2042,7 +2042,7 @@ class _PayFinePageState extends State<PayFinePage> {
                         height: 120,
                         alignment: Alignment.center,
                         child: const Text(
-                          "Payment instruction image not found.\nPlease add 'assets/sbi_collect_steps.jpg' to your assets.",
+                          "Payment instruction image not found",
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Colors.red),
                         ),
@@ -2092,12 +2092,19 @@ class _PayFinePageState extends State<PayFinePage> {
               child: FilledButton(
                 onPressed: totalFine > 0
                     ? () => _showPaymentDialog(context, totalFine)
-                    : null,
+                    : () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("You have no fines to pay!"),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      },
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 18),
                   backgroundColor: totalFine > 0
                       ? Theme.of(context).colorScheme.primary
-                      : Colors.grey,
+                      : Colors.green,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(20),
                   ),
