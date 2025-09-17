@@ -20,7 +20,17 @@ def get_user_profile(request, cardnumber):
     except Borrowers.DoesNotExist:
         return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    profile_url = borrower.profile_picture if borrower.profile_picture else ''
+    # Always return the full media URL if profile_picture is set and file exists
+    profile_url = ''
+    if borrower.profile_picture:
+        rel_path = borrower.profile_picture.lstrip('/')
+        abs_path = os.path.join(default_storage.location, rel_path)
+        if os.path.exists(abs_path):
+            # Always serve from /media/profile_pictures/... (never /profile_pictures/...)
+            profile_url = request.build_absolute_uri(f"/media/{rel_path}")
+        else:
+            profile_url = ''  # File missing, return empty string
+
     return Response({
         'student_id': borrower.cardnumber,
         'name': borrower.firstname + ' ' + borrower.surname,
@@ -28,18 +38,6 @@ def get_user_profile(request, cardnumber):
         'phone': borrower.phone,
         'profile_image_url': profile_url,
     }, status=status.HTTP_200_OK)
-from django.views.decorators.csrf import csrf_exempt
-from django.db import connection
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
-from rest_framework import status
-from .models import Borrowers, Items, Issues, OTPVerification, BookSuggestion, Wishlist
-import os
-from dotenv import load_dotenv
 
 load_dotenv("C:\\Users\\sayan\\Desktop\\c++\\project_library\\NovaLiB\\novalib_testserver\\security.env")
 
@@ -453,17 +451,20 @@ def update_profile_picture(request):
         return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
     # Save image to media/profile_pictures/<cardnumber>.jpg
-    file_path = f"profile_pictures/{cardnumber}.jpg"
-    full_path = os.path.join(file_path)
-    # Ensure the directory exists
-    os.makedirs(os.path.dirname(full_path), exist_ok=True)
-    path = default_storage.save(full_path, ContentFile(image.read()))
+    # Use only the relative path for storage and model
+    file_path = f"profile_pictures/{cardnumber}.jpg"  # No leading slash
+    abs_dir = os.path.join(default_storage.location, "profile_pictures")
+    os.makedirs(abs_dir, exist_ok=True)
+    abs_path = os.path.join(default_storage.location, file_path)
+    with open(abs_path, "wb") as f:
+        f.write(image.read())
 
     # Save the relative path to the Borrowers model
     borrower.profile_picture = file_path
     borrower.save()
 
     # Return a URL that can be served by Django's media endpoint
-    profile_picture_url = request.build_absolute_uri(f"{file_path}")
+    profile_picture_url = request.build_absolute_uri(f"/media/{file_path}")
 
     return Response({'message': 'Profile picture updated successfully', 'profile_picture_url': profile_picture_url}, status=status.HTTP_200_OK)
+##C:\Users\sayan\Desktop\Novalib_AUS\novalib_testserver\media\profile_pictures

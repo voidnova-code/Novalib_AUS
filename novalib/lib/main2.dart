@@ -25,7 +25,7 @@ class ApiService {
   }
 
   // IMPORTANT: Replace with your computer's network IP address and Django port
-  static const String baseUrl = 'http://10.53.7.19:8000';
+  static const String baseUrl = 'http://192.168.173.28:8000';
   static final http.Client _client = http.Client();
 
   static Future<Map<String, dynamic>> login(String studentId) async {
