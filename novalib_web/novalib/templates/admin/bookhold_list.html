@@ -1,0 +1,37 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>Book Hold List for {{ user.first_name }} {{ user.last_name }} ({{ user.barcode_number }})</h1>
+<table class="adminlist">
+    <thead>
+        <tr>
+            <th>Book Barcode</th>
+            <th>Book Title</th>
+            <th>Author</th>
+            <th>Available</th>
+            <th>Timestamp</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for book in bookholds %}
+        <tr>
+            <td>{{ book.book_barcode }}</td>
+            <td>{{ book.book_title }}</td>
+            <td>{{ book.auther }}</td>
+            <td>
+                {% if book.avalible %}
+                    <span style="color:green;">Available</span>
+                {% else %}
+                    <span style="color:red;">Not Available</span>
+                {% endif %}
+            </td>
+            <td>{{ book.timestamp }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="5">No book holds found for this user.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+<a href="{% url 'admin:novalib_user_changelist' %}">Back to User List</a>
+{% endblock %}
