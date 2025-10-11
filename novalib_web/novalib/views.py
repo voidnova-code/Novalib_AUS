@@ -2,7 +2,7 @@ from django.shortcuts import render
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.core.mail import send_mail
-from novalib.models import User, Login, Notification, DeveloperNotification  # Use Notification instead of DeveloperNotification
+from novalib.models import User, Login, Notification, DeveloperNotification
 from django.utils.timezone import now, timedelta
 import json
 import random
