@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'home.dart';
 import 'login.dart';
-import 'pages/Notification.dart';
+import 'Notification_pages/Notification.dart';
+import 'Notification_pages/Notification_Image.dart';
+import 'AboutUS_pages/About_NovaLib.dart';
+import 'config.dart'; // import shared base URL
 import 'package:http/http.dart' as http;
-
-const String djangoBaseUrl = 'http://192.168.182.28:8000'; // Global API base URL
 
 Future<void> connectToDjangoServer() async {
   final candidates = <String>[
@@ -54,17 +55,34 @@ class MyApp extends StatelessWidget {
           bool useAltBackground = false;
 
           if (args is Map<String, dynamic>) {
-            username = args['username'] ?? 'User';
+            // Defensive: fallback to 'User' if username is null or empty
+            username =
+                (args['username'] is String &&
+                    (args['username'] as String).isNotEmpty)
+                ? args['username']
+                : 'User';
             useAltBackground = args['useAltBackground'] ?? false;
           } else if (args is String && args.isNotEmpty) {
             username = args;
           }
+          // If username is still empty, fallback
+          if (username.isEmpty) username = 'User';
+
           return HomePage(
             useAltBackground: useAltBackground,
             username: username,
           );
         },
-        '/notifications': (context) => NotificationPage(),
+        '/notifications': (context) => const NotificationPage(),
+        '/notification_image': (context) => const NotificationImagePage(),
+        '/about_novalib': (context) {
+          final args = ModalRoute.of(context)?.settings.arguments;
+          bool useAltBackground = false;
+          if (args is Map && args['useAltBackground'] != null) {
+            useAltBackground = args['useAltBackground'] == true;
+          }
+          return AboutNovaLibPage(useAltBackground: useAltBackground);
+        },
       },
     );
   }
