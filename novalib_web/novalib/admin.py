@@ -3,6 +3,7 @@ from django.urls import reverse, path
 from django.utils.html import format_html
 from django.shortcuts import redirect, render
 from django.db import models  # <-- Add this import
+from django import forms  # <-- Add this import
 from .models import User, BooksLog, Login, ReturnDesk, Department, Notification, DeveloperNotification  # Add DeveloperNotification
 
 # Register your models here.
@@ -11,7 +12,7 @@ from .models import User, BooksLog, Login, ReturnDesk, Department, Notification,
 class UserAdmin(admin.ModelAdmin):
     list_display = (
         'barcode_number', 'first_name', 'last_name', 'phone_number', 'email', 'department',
-        'issued_book_list', 'wish_list', 'payment'
+        'issued_book_list', 'wish_list', 'due_fine'  # show Due Fine column
     )
     search_fields = ('barcode_number', 'first_name', 'last_name', 'email', 'phone_number', 'department')
     actions = ['view_profile_action', 'view_wishlist_action', 'view_bookhold_action']
@@ -22,7 +23,8 @@ class UserAdmin(admin.ModelAdmin):
     profile_link.short_description = 'Profile'
 
     def wishlist_link(self, obj):
-        url = reverse('admin:novalib_bookslog_changelist') + f'?user__id__exact={obj.pk}&avalible=1'
+        # Filter BooksLog by ManyToMany wishlist relation
+        url = reverse('admin:novalib_bookslog_changelist') + f'?wishlist__id__exact={obj.pk}'
         return format_html('<a href="{}">Wishlist</a>', url)
     wishlist_link.short_description = 'Wishlist'
 
@@ -43,8 +45,8 @@ class UserAdmin(admin.ModelAdmin):
     def view_wishlist_action(self, request, queryset):
         if queryset.count() == 1:
             obj = queryset.first()
-            # Show only wishlist books for the selected user (avalible=True)
-            wishlist_books = BooksLog.objects.filter(user=obj, avalible=True)
+            # Show only wishlist books for the selected user via M2M field
+            wishlist_books = BooksLog.objects.filter(wishlist=obj)
             context = dict(
                 self.admin_site.each_context(request),
                 user=obj,
@@ -84,6 +86,13 @@ class UserAdmin(admin.ModelAdmin):
         ) or "-"
     wish_list.short_description = "Wish List"
 
+    # New: Due Fine column (sum of fines from ReturnDesk for the user)
+    def due_fine(self, obj):
+        total_fine = ReturnDesk.objects.filter(student=obj).aggregate(models.Sum('fine'))['fine__sum']
+        return total_fine if total_fine else 0
+    due_fine.short_description = "Due Fine"
+
+    # Keep existing payment method (not shown in list_display anymore)
     def payment(self, obj):
         # Sum of fines for the user in ReturnDesk
         total_fine = ReturnDesk.objects.filter(student=obj).aggregate(models.Sum('fine'))['fine__sum']
@@ -159,6 +168,55 @@ class ReturnDeskAdmin(admin.ModelAdmin):
         'student_barcode', 'student_name', 'book', 'fine', 'otp', 'otp_expired'
     )
     search_fields = ('student__barcode_number', 'student__first_name', 'student__last_name', 'book', 'otp')
+
+    # Detect if ReturnDesk.book is a ForeignKey to BooksLog
+    _book_field = ReturnDesk._meta.get_field('book')
+    _is_book_fk = isinstance(_book_field, models.ForeignKey) and getattr(_book_field.remote_field, 'model', None) is BooksLog
+
+    # If FK -> enable autocomplete, otherwise use a custom form with choices from BooksLog
+    if _is_book_fk:
+        autocomplete_fields = ['book']
+    else:
+        class ReturnDeskForm(forms.ModelForm):
+            # Replace raw input with a dropdown fed from BooksLog
+            book = forms.ChoiceField(required=True, choices=[])
+
+            class Meta:
+                model = ReturnDesk
+                fields = '__all__'
+
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                # Try to scope options to the selected student, else show all
+                student_id = self.initial.get('student') or getattr(self.instance, 'student_id', None)
+                qs = BooksLog.objects.all()
+                if student_id:
+                    qs = qs.filter(user_id=student_id, avalible=False)
+                # Build choices (value=title, label=title + barcode)
+                seen = set()
+                choices = []
+                for b in qs.order_by('-issued_date')[:500]:
+                    title = getattr(b, 'book_title', '') or ''
+                    if title in seen:
+                        continue
+                    seen.add(title)
+                    barcode = getattr(b, 'book_barcode', '') or ''
+                    label = f"{title} ({barcode})" if barcode else title
+                    choices.append((title, label))
+                self.fields['book'].choices = choices
+
+        form = ReturnDeskForm
+
+    # When book is FK, filter its queryset to the selected student (if provided)
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if self._is_book_fk and db_field.name == 'book':
+            qs = BooksLog.objects.all()
+            # Try to grab student id from GET (add form) or POST (change form)
+            student_id = request.GET.get('student') or request.POST.get('student')
+            if student_id:
+                qs = qs.filter(user_id=student_id, avalible=False)
+            kwargs['queryset'] = qs.order_by('-issued_date')
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def student_barcode(self, obj):
         return obj.student.barcode_number

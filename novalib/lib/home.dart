@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:ui'; // for ImageFilter.blur
 import 'config.dart'; // use shared config instead of importing main.dart
 import 'dart:async'; // Add this import for Timer
+import 'WishList_page/wishlist.dart'; // already imported
 
 class HomePage extends StatefulWidget {
   final bool useAltBackground;
@@ -479,71 +480,111 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _fetchIssuedBooks() async {
     if (!mounted) return;
+    setState(() => _isBooksLoading = true);
 
-    setState(() {
-      _isBooksLoading = true;
-    });
+    // Parse list and extract possible owner and author fields
+    List<Map<String, String>> parseList(dynamic body) {
+      if (body is! List) return [];
+      return body
+          .map<Map<String, String>>((item) {
+            final m = item as Map<String, dynamic>;
+            final ownerRaw =
+                (m['username'] ??
+                        m['user'] ??
+                        m['issued_to'] ??
+                        m['borrower'] ??
+                        m['student'] ??
+                        '')
+                    .toString();
+            return {
+              'title': (m['book_title'] ?? '').toString(),
+              'author': (m['book_author'] ?? m['auther'] ?? '').toString(),
+              'issued_date': (m['issued_date'] ?? '').toString(),
+              'return_date': (m['return_date'] ?? '').toString(),
+              'owner': ownerRaw,
+            };
+          })
+          .where((b) => (b['title'] ?? '').isNotEmpty)
+          .toList();
+    }
+
+    Future<List<Map<String, String>>> _try(Uri url) async {
+      try {
+        final resp = await http.get(url).timeout(const Duration(seconds: 8));
+        if (resp.statusCode != 200) return [];
+        return parseList(json.decode(resp.body));
+      } catch (_) {
+        return [];
+      }
+    }
 
     try {
       final baseUrl = djangoBaseUrl.endsWith('/')
           ? djangoBaseUrl.substring(0, djangoBaseUrl.length - 1)
           : djangoBaseUrl;
+      final uname = Uri.encodeComponent(widget.username);
 
-      debugPrint(
-        'Fetching books for user: ${widget.username} from: $baseUrl/book-log/?username=${Uri.encodeComponent(widget.username)}',
-      );
+      // Try multiple identifiers, then global fallbacks
+      final attempts = <Uri>[
+        // Prefer issued items
+        Uri.parse('$baseUrl/book-log/?username=$uname&avalible=0'),
+        Uri.parse('$baseUrl/book-log/?username=$uname'),
+        Uri.parse('$baseUrl/book-log/?barcode=$uname&avalible=0'),
+        Uri.parse('$baseUrl/book-log/?email=$uname&avalible=0'),
+        if (int.tryParse(widget.username) != null)
+          Uri.parse('$baseUrl/book-log/?user_id=${widget.username}&avalible=0'),
+        // Global fallbacks if backend ignores identifiers
+        Uri.parse('$baseUrl/book-log/?avalible=0'),
+        Uri.parse('$baseUrl/book-log/'),
+      ];
 
-      final response = await http
-          .get(
-            Uri.parse(
-              '$baseUrl/book-log/?username=${Uri.encodeComponent(widget.username)}',
-            ),
-          )
-          .timeout(const Duration(seconds: 5));
+      List<Map<String, String>> found = [];
+      for (final url in attempts) {
+        debugPrint('IssuedBooks attempt: $url');
+        found = await _try(url);
+        if (found.isNotEmpty) break;
+      }
 
-      if (!mounted) return;
+      // Client-side filter: match owner tokens with username tokens if owner present
+      if (found.isNotEmpty) {
+        String norm(String s) => s.toLowerCase().trim();
+        final userTok = norm(
+          widget.username,
+        ).split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toSet();
 
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-
-        // Fallback filter on client if backend doesn't filter by username
-        final lowerUser = widget.username.toLowerCase().trim();
-        final List<dynamic> owned = data.where((item) {
-          final candidate =
-              (item['username'] ??
-                      item['user'] ??
-                      item['issued_to'] ??
-                      item['borrower'] ??
-                      item['student'] ??
-                      '')
-                  .toString()
-                  .toLowerCase()
-                  .trim();
-
-          // If API includes an owner-like field, enforce match; otherwise keep item (assume backend filtered)
-          return candidate.isEmpty ? true : candidate == lowerUser;
+        List<Map<String, String>> filtered = found.where((b) {
+          final owner = norm(b['owner'] ?? '');
+          if (owner.isEmpty) return true; // cannot filter without owner
+          final ownTok = owner
+              .split(RegExp(r'\s+'))
+              .where((t) => t.isNotEmpty)
+              .toSet();
+          // Keep if any token overlaps or direct contains either way
+          final overlap = userTok.intersection(ownTok).isNotEmpty;
+          return overlap ||
+              owner.contains(norm(widget.username)) ||
+              norm(widget.username).contains(owner);
         }).toList();
 
-        setState(() {
-          _issuedBooks = owned
-              .map<Map<String, String>>(
-                (item) => {
-                  'title': item['book_title']?.toString() ?? '',
-                  'author': item['book_author']?.toString() ?? '',
-                  'issued_date': item['issued_date']?.toString() ?? '',
-                  'return_date': item['return_date']?.toString() ?? '',
-                },
-              )
-              .toList();
-        });
+        // If filtering removed everything (owner not matching tokens), fall back to original result
+        if (filtered.isNotEmpty) {
+          found = filtered;
+        }
       }
+
+      if (!mounted) return;
+      setState(() {
+        _issuedBooks = found;
+      });
     } catch (e) {
       debugPrint('Fetch books error: $e');
+      if (!mounted) return;
+      setState(() {
+        _issuedBooks = [];
+      });
     } finally {
       if (mounted) {
-        setState(() {
-          _isBooksLoading = false;
-        });
+        setState(() => _isBooksLoading = false);
       }
     }
   }
@@ -644,7 +685,17 @@ class _HomePageState extends State<HomePage> {
                     ListTile(
                       leading: const Icon(Icons.bookmark_border),
                       title: const Text('Wishlist'),
-                      onTap: () => Navigator.pop(context),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          WishListPage.route(
+                            username: widget.username,
+                            useAltBackground:
+                                widget.useAltBackground, // pass flag
+                          ),
+                        );
+                      },
                     ),
                     ListTile(
                       leading: const Icon(Icons.person_outline),
@@ -715,582 +766,601 @@ class _HomePageState extends State<HomePage> {
           // Content
           Positioned.fill(
             child: SafeArea(
-              child: SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                child: Column(
-                  children: [
-                    // Header bar
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 10,
-                        horizontal: 16,
-                      ),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: const Color.fromARGB(
-                            255,
-                            0,
-                            0,
-                            0,
-                          ).withOpacity(0.35),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: Colors.white.withOpacity(0.20),
-                            width: 1,
-                          ),
-                        ),
+              child: RefreshIndicator(
+                key: _refreshKey,
+                color: Colors.white,
+                backgroundColor: Colors.black54,
+                onRefresh: _refreshHome,
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(
+                    parent: BouncingScrollPhysics(),
+                  ),
+                  child: Column(
+                    children: [
+                      // Header bar
+                      Padding(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 6,
+                          vertical: 10,
+                          horizontal: 16,
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.menu,
-                                    color: Colors.white,
-                                    size: 28,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: const Color.fromARGB(
+                              255,
+                              0,
+                              0,
+                              0,
+                            ).withOpacity(0.35),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: Colors.white.withOpacity(0.20),
+                              width: 1,
+                            ),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 6,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.menu,
+                                      color: Colors.white,
+                                      size: 28,
+                                    ),
+                                    onPressed: _openDrawer,
                                   ),
-                                  onPressed: _openDrawer,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: SizedBox(
-                                    height: 36,
-                                    child: TextButton.icon(
-                                      icon: const Icon(
-                                        Icons.language,
-                                        color: Colors.white,
-                                        size: 18,
-                                      ),
-                                      label: const Text(
-                                        'Visit Website',
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      style: TextButton.styleFrom(
-                                        backgroundColor: Colors.white
-                                            .withOpacity(0.15),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            30,
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: SizedBox(
+                                      height: 36,
+                                      child: TextButton.icon(
+                                        icon: const Icon(
+                                          Icons.language,
+                                          color: Colors.white,
+                                          size: 18,
+                                        ),
+                                        label: const Text(
+                                          'Visit Website',
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        style: ButtonStyle(
+                                          backgroundColor:
+                                              MaterialStateProperty.all(
+                                                Colors.white.withOpacity(0.15),
+                                              ),
+                                          shape: MaterialStateProperty.all(
+                                            RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(30),
+                                            ),
+                                          ),
+                                          padding: MaterialStateProperty.all(
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 4,
+                                            ),
+                                          ),
+                                          minimumSize:
+                                              MaterialStateProperty.all(
+                                                Size.zero,
+                                              ),
+                                          tapTargetSize:
+                                              MaterialTapTargetSize.shrinkWrap,
+                                        ),
+                                        onPressed: () => _launchWebsite(
+                                          Uri.parse(
+                                            'https://www.wikipedia.org/',
                                           ),
                                         ),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 4,
-                                        ),
-                                        minimumSize: Size.zero,
-                                        tapTargetSize:
-                                            MaterialTapTargetSize.shrinkWrap,
-                                      ),
-                                      onPressed: () => _launchWebsite(
-                                        Uri.parse('https://www.wikipedia.org/'),
                                       ),
                                     ),
                                   ),
-                                ),
-                                const SizedBox(width: 8),
-                                IconButton(
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                  icon: const Icon(
-                                    Icons.refresh,
-                                    color: Colors.white,
-                                    size: 24,
-                                  ),
-                                  onPressed: () {
-                                    _refreshKey.currentState?.show();
-                                    _refreshHome();
-                                  },
-                                ),
-                                IconButton(
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                  icon: const Icon(
-                                    Icons.notifications,
-                                    color: Colors.white,
-                                    size: 24,
-                                  ),
-                                  onPressed: () {
-                                    Navigator.pushNamed(
-                                      context,
-                                      '/notifications',
-                                      arguments: {
-                                        'useAltBackground':
-                                            widget.useAltBackground,
-                                      },
-                                    );
-                                  },
-                                ),
-                                IconButton(
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(
-                                    minWidth: 10,
-                                  ),
-                                  icon: const Icon(
-                                    Icons.logout,
-                                    color: Colors.white,
-                                    size: 24,
-                                  ),
-                                  onPressed: () {
-                                    Navigator.pushReplacementNamed(
-                                      context,
-                                      '/login',
-                                    );
-                                  },
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            // Greeting row
-                            Padding(
-                              padding: const EdgeInsets.only(left: 8),
-                              child: Row(
-                                children: [
-                                  CircleAvatar(
-                                    radius: 20,
-                                    backgroundColor: const Color(0xFF5B6BFF),
-                                    child: Text(
-                                      initial,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 18,
-                                      ),
+                                  const SizedBox(width: 8),
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    icon: const Icon(
+                                      Icons.refresh,
+                                      color: Colors.white,
+                                      size: 24,
                                     ),
+                                    onPressed: () async {
+                                      _refreshKey.currentState?.show();
+                                      await _refreshHome();
+                                    },
                                   ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(
-                                      'Hello, ${widget.username}! 😄',
-                                      style: const TextStyle(
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    icon: const Icon(
+                                      Icons.notifications,
+                                      color: Colors.white,
+                                      size: 24,
                                     ),
+                                    onPressed: () {
+                                      Navigator.pushNamed(
+                                        context,
+                                        '/notifications',
+                                        arguments: {
+                                          'useAltBackground':
+                                              widget.useAltBackground,
+                                        },
+                                      );
+                                    },
+                                  ),
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(
+                                      minWidth: 10,
+                                    ),
+                                    icon: const Icon(
+                                      Icons.logout,
+                                      color: Colors.white,
+                                      size: 24,
+                                    ),
+                                    onPressed: () {
+                                      Navigator.pushReplacementNamed(
+                                        context,
+                                        '/login',
+                                      );
+                                    },
                                   ),
                                 ],
                               ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    // Search with dropdown suggestions (overlay-based)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-                      child: CompositedTransformTarget(
-                        link: _layerLink,
-                        child: TextField(
-                          controller: _searchController,
-                          focusNode: _searchFocusNode,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16.0,
-                            fontWeight: FontWeight.w500,
-                          ), // Make text more visible with increased weight
-                          cursorColor: Colors.white, // Brighter cursor
-                          cursorWidth:
-                              2.0, // Wider cursor for better visibility
-                          decoration: InputDecoration(
-                            hintText:
-                                'Search books...', // Changed from 'Search Google or type a URL'
-                            hintStyle: TextStyle(
-                              color: Colors.white60,
-                            ), // Lighter hint text
-                            filled: true,
-                            fillColor: const Color(0xFF202020).withOpacity(0.7),
-                            prefixIcon: _isSearchLoading
-                                ? Container(
-                                    padding: const EdgeInsets.all(10),
-                                    width: 12,
-                                    height: 12,
-                                    child: const CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white70,
+                              const SizedBox(height: 8),
+                              // Greeting row
+                              Padding(
+                                padding: const EdgeInsets.only(left: 8),
+                                child: Row(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 20,
+                                      backgroundColor: const Color(0xFF5B6BFF),
+                                      child: Text(
+                                        initial,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 18,
+                                        ),
+                                      ),
                                     ),
-                                  )
-                                : const Icon(
-                                    Icons.search,
-                                    color: Colors.white70,
-                                    size: 22,
-                                  ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              vertical:
-                                  12, // Increased for better text visibility
-                              horizontal:
-                                  12, // Increased for better text visibility
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(28),
-                              borderSide: BorderSide.none,
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(28),
-                              borderSide: BorderSide.none,
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(28),
-                              borderSide: BorderSide(
-                                color: Colors.white30,
-                                width: 1,
-                              ), // Add subtle border when focused
-                            ),
-                          ),
-                          onChanged: (value) {
-                            _onSearchChanged(value);
-                            // Only show suggestions after minimum length
-                            if (value.trim().length > 1) {
-                              // At least 2 characters
-                              _showSuggestionsOverlay();
-                            } else {
-                              _hideSuggestionsOverlay();
-                            }
-                          },
-                          onSubmitted: (query) {
-                            if (query.trim().isEmpty) return;
-                            _debounce?.cancel();
-                            _executeSimpleSearch(query);
-                            _hideSuggestionsOverlay();
-                          },
-                          onTap: () {
-                            // Show suggestions when search bar is tapped if there's text
-                            if (_searchController.text.trim().isNotEmpty) {
-                              _showSuggestionsOverlay();
-                            }
-                          },
-                        ),
-                      ),
-                    ),
-                    // For you
-                    const SizedBox(height: 12),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'For you',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.2,
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        'Hello, ${widget.username}! 😄',
+                                        style: const TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 18),
-                    // Three boxes
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Container(
-                              height: 90,
-                              decoration: _glassBoxDecoration(),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  // Show real issued books count with a small loader
-                                  if (_isBooksLoading)
-                                    const SizedBox(
-                                      height: 26,
-                                      width: 26,
-                                      child: CircularProgressIndicator(
+                      // Search with dropdown suggestions (overlay-based)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                        child: CompositedTransformTarget(
+                          link: _layerLink,
+                          child: TextField(
+                            controller: _searchController,
+                            focusNode: _searchFocusNode,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16.0,
+                              fontWeight: FontWeight.w500,
+                            ), // Make text more visible with increased weight
+                            cursorColor: Colors.white, // Brighter cursor
+                            cursorWidth:
+                                2.0, // Wider cursor for better visibility
+                            decoration: InputDecoration(
+                              hintText:
+                                  'Search books...', // Changed from 'Search Google or type a URL'
+                              hintStyle: TextStyle(
+                                color: Colors.white60,
+                              ), // Lighter hint text
+                              filled: true,
+                              fillColor: const Color(
+                                0xFF202020,
+                              ).withOpacity(0.7),
+                              prefixIcon: _isSearchLoading
+                                  ? Container(
+                                      padding: const EdgeInsets.all(10),
+                                      width: 12,
+                                      height: 12,
+                                      child: const CircularProgressIndicator(
                                         strokeWidth: 2,
-                                        color: Colors.white,
+                                        color: Colors.white70,
                                       ),
                                     )
-                                  else
+                                  : const Icon(
+                                      Icons.search,
+                                      color: Colors.white70,
+                                      size: 22,
+                                    ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                vertical:
+                                    12, // Increased for better text visibility
+                                horizontal:
+                                    12, // Increased for better text visibility
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(28),
+                                borderSide: BorderSide.none,
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(28),
+                                borderSide: BorderSide.none,
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(28),
+                                borderSide: BorderSide(
+                                  color: Colors.white30,
+                                  width: 1,
+                                ), // Add subtle border when focused
+                              ),
+                            ),
+                            onChanged: (value) {
+                              _onSearchChanged(value);
+                              // Only show suggestions after minimum length
+                              if (value.trim().length > 1) {
+                                // At least 2 characters
+                                _showSuggestionsOverlay();
+                              } else {
+                                _hideSuggestionsOverlay();
+                              }
+                            },
+                            onSubmitted: (query) {
+                              if (query.trim().isEmpty) return;
+                              _debounce?.cancel();
+                              _executeSimpleSearch(query);
+                              _hideSuggestionsOverlay();
+                            },
+                            onTap: () {
+                              // Show suggestions when search bar is tapped if there's text
+                              if (_searchController.text.trim().isNotEmpty) {
+                                _showSuggestionsOverlay();
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+                      // For you
+                      const SizedBox(height: 12),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'For you',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      // Three boxes
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Container(
+                                height: 90,
+                                decoration: _glassBoxDecoration(),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    // Show real issued books count with a small loader
+                                    if (_isBooksLoading)
+                                      const SizedBox(
+                                        height: 26,
+                                        width: 26,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    else
+                                      Text(
+                                        '${_issuedBooks.length}',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 32,
+                                        ),
+                                      ),
+                                    const SizedBox(height: 4),
+                                    const Text(
+                                      'Issued Books',
+                                      style: TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Container(
+                                margin: const EdgeInsets.only(left: 10),
+                                height: 90,
+                                decoration: _glassBoxDecoration(),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: const [
                                     Text(
-                                      '${_issuedBooks.length}',
-                                      style: const TextStyle(
+                                      '5',
+                                      style: TextStyle(
                                         color: Colors.white,
                                         fontWeight: FontWeight.bold,
                                         fontSize: 32,
                                       ),
                                     ),
-                                  const SizedBox(height: 4),
-                                  const Text(
-                                    'Issued Books',
-                                    style: TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
+                                    SizedBox(height: 4),
+                                    Text(
+                                      'Wishlist',
+                                      style: TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                      ),
                                     ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: Container(
-                              margin: const EdgeInsets.only(left: 10),
-                              height: 90,
-                              decoration: _glassBoxDecoration(),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: const [
-                                  Text(
-                                    '5',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 32,
-                                    ),
-                                  ),
-                                  SizedBox(height: 4),
-                                  Text(
-                                    'Wishlist',
-                                    style: TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: Container(
-                              margin: const EdgeInsets.only(left: 10),
-                              height: 90,
-                              decoration: _glassBoxDecoration(),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: const [
-                                  Text(
-                                    '₹12',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 32,
-                                    ),
-                                  ),
-                                  SizedBox(height: 4),
-                                  Text(
-                                    'Due Fine',
-                                    style: TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    // Issued Books section
-                    const SizedBox(height: 18),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Issued Books',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.2,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Container(
-                        decoration: _glassItemDecoration(), // Transparent box
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 10,
-                          horizontal: 8,
-                        ),
-                        child: _isBooksLoading
-                            ? const Center(
-                                child: Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 24),
-                                  child: CircularProgressIndicator(),
+                                  ],
                                 ),
-                              )
-                            : Column(
-                                children: _filteredBooks.isEmpty
-                                    ? [
-                                        const Text(
-                                          'No books found.',
-                                          style: TextStyle(
-                                            color: Color.fromARGB(
-                                              137,
-                                              255,
-                                              255,
-                                              255,
-                                            ),
-                                            fontSize: 16,
-                                          ),
-                                        ),
-                                      ]
-                                    : List.generate(
-                                        _filteredBooks.length,
-                                        (i) => Container(
-                                          margin: const EdgeInsets.only(
-                                            bottom: 12,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color:
-                                                const Color.fromARGB(
-                                                  255,
-                                                  30,
-                                                  30,
-                                                  30,
-                                                ).withOpacity(
-                                                  0.8,
-                                                ), // Darker background
-                                            borderRadius: BorderRadius.circular(
-                                              14,
-                                            ),
-                                            border: Border.all(
-                                              color: Colors.white.withOpacity(
-                                                0.18,
+                              ),
+                            ),
+                            Expanded(
+                              child: Container(
+                                margin: const EdgeInsets.only(left: 10),
+                                height: 90,
+                                decoration: _glassBoxDecoration(),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: const [
+                                    Text(
+                                      '₹12',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 32,
+                                      ),
+                                    ),
+                                    SizedBox(height: 4),
+                                    Text(
+                                      'Due Fine',
+                                      style: TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Issued Books section
+                      const SizedBox(height: 18),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Issued Books',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Container(
+                          decoration: _glassItemDecoration(), // Transparent box
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 10,
+                            horizontal: 8,
+                          ),
+                          child: _isBooksLoading
+                              ? const Center(
+                                  child: Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 24),
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                )
+                              : Column(
+                                  children: _filteredBooks.isEmpty
+                                      ? [
+                                          const Text(
+                                            'No books found.',
+                                            style: TextStyle(
+                                              color: Color.fromARGB(
+                                                137,
+                                                255,
+                                                255,
+                                                255,
                                               ),
-                                              width: 1,
+                                              fontSize: 16,
                                             ),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: Colors.black.withOpacity(
-                                                  0.2,
-                                                ),
-                                                blurRadius: 6,
-                                                offset: const Offset(0, 3),
-                                              ),
-                                            ],
                                           ),
-                                          child: ListTile(
-                                            leading: ClipRRect(
+                                        ]
+                                      : List.generate(
+                                          _filteredBooks.length,
+                                          (i) => Container(
+                                            margin: const EdgeInsets.only(
+                                              bottom: 12,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color:
+                                                  const Color.fromARGB(
+                                                    255,
+                                                    30,
+                                                    30,
+                                                    30,
+                                                  ).withOpacity(
+                                                    0.8,
+                                                  ), // Darker background
                                               borderRadius:
-                                                  BorderRadius.circular(8),
-                                              child: Container(
-                                                color: const Color(0xFF5B6BFF),
-                                                width: 50,
-                                                height: 50,
-                                                child: Icon(
-                                                  Icons.menu_book_rounded,
-                                                  color: Colors.white,
-                                                  size: 28,
-                                                ),
-                                              ),
-                                            ),
-                                            title: Text(
-                                              _filteredBooks[i]['title']!,
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.w600,
-                                                fontSize: 16,
-                                              ),
-                                            ),
-                                            subtitle: Text(
-                                              _filteredBooks[i]['author']!,
-                                              style: TextStyle(
+                                                  BorderRadius.circular(14),
+                                              border: Border.all(
                                                 color: Colors.white.withOpacity(
-                                                  0.7,
+                                                  0.18,
                                                 ),
-                                                fontSize: 13,
+                                                width: 1,
                                               ),
-                                            ),
-                                            trailing: Column(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.center,
-                                              children: [
-                                                Icon(
-                                                  Icons
-                                                      .arrow_forward_ios_rounded,
-                                                  color: Colors.white
-                                                      .withOpacity(0.5),
-                                                  size: 18,
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black
+                                                      .withOpacity(0.2),
+                                                  blurRadius: 6,
+                                                  offset: const Offset(0, 3),
                                                 ),
                                               ],
                                             ),
+                                            child: ListTile(
+                                              leading: ClipRRect(
+                                                borderRadius:
+                                                    BorderRadius.circular(8),
+                                                child: Container(
+                                                  color: const Color(
+                                                    0xFF5B6BFF,
+                                                  ),
+                                                  width: 50,
+                                                  height: 50,
+                                                  child: Icon(
+                                                    Icons.menu_book_rounded,
+                                                    color: Colors.white,
+                                                    size: 28,
+                                                  ),
+                                                ),
+                                              ),
+                                              title: Text(
+                                                _filteredBooks[i]['title']!,
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 16,
+                                                ),
+                                              ),
+                                              subtitle: Text(
+                                                _filteredBooks[i]['author']!,
+                                                style: TextStyle(
+                                                  color: Colors.white
+                                                      .withOpacity(0.7),
+                                                  fontSize: 13,
+                                                ),
+                                              ),
+                                              trailing: Column(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  Icon(
+                                                    Icons
+                                                        .arrow_forward_ios_rounded,
+                                                    color: Colors.white
+                                                        .withOpacity(0.5),
+                                                    size: 18,
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
                                           ),
                                         ),
-                                      ),
-                              ),
+                                ),
+                        ),
                       ),
-                    ),
-                    // Recommendations
-                    const SizedBox(height: 18),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Book recommended for you',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.2,
+                      // Recommendations
+                      const SizedBox(height: 18),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Book recommended for you',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.2,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 14),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Container(
-                              height: 200,
-                              decoration: _glassCardDecoration(),
-                              child: _bookIcon(),
+                      const SizedBox(height: 14),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Container(
+                                height: 200,
+                                decoration: _glassCardDecoration(),
+                                child: _bookIcon(),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Container(
-                              height: 200,
-                              decoration: _glassCardDecoration(),
-                              child: _bookIcon(),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Container(
+                                height: 200,
+                                decoration: _glassCardDecoration(),
+                                child: _bookIcon(),
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 14),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Container(
-                              height: 200,
-                              decoration: _glassCardDecoration(),
-                              child: _bookIcon(),
+                      const SizedBox(height: 14),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Container(
+                                height: 200,
+                                decoration: _glassCardDecoration(),
+                                child: _bookIcon(),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Container(
-                              height: 200,
-                              decoration: _glassCardDecoration(),
-                              child: _bookIcon(),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Container(
+                                height: 200,
+                                decoration: _glassCardDecoration(),
+                                child: _bookIcon(),
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 80),
-                  ],
+                      const SizedBox(height: 80),
+                    ],
+                  ),
                 ),
               ),
             ),

@@ -5,7 +5,7 @@ from django.core.mail import send_mail
 from novalib.models import User, Login, Notification, DeveloperNotification
 from novalib.models import BooksLog  # fixed import
 from django.utils.timezone import now, timedelta
-from django.db.models import Q  # add this
+from django.db.models import Q
 import json
 import random
 
@@ -218,43 +218,56 @@ def book_log_list(request):
         barcode = (request.GET.get('barcode') or request.GET.get('barcode_number') or '').strip()
         email = (request.GET.get('email') or '').strip()
         user_id = (request.GET.get('user_id') or '').strip()
+        wishlist_param = (request.GET.get('wishlist') or '').strip().lower()
+        avalible_param = (request.GET.get('avalible') or '').strip().lower()
 
         logs = BooksLog.objects.all().order_by('-issued_date')
 
-        # Resolve users from User table first
-        def _norm(s):
-            return ' '.join(str(s or '').split()).lower()
+        # Resolve users first if any identifier is provided
+        users_qs = None
+        if barcode or user_id or email or username:
+            users = User.objects.all()
+            q = Q()
+            if barcode:
+                q |= Q(barcode_number__iexact=barcode)
+            if user_id.isdigit():
+                q |= Q(id=int(user_id))
+            if email:
+                q |= Q(email__iexact=email)
+            if username:
+                parts = [p for p in username.split() if p]
+                if len(parts) >= 2:
+                    q |= (Q(first_name__iexact=parts[0]) & Q(last_name__iexact=parts[-1]))
+                # broaden username matching (either name part matches)
+                q |= Q(first_name__icontains=username) | Q(last_name__icontains=username)
+                # also try if someone passes barcode/email via username param
+                q |= Q(barcode_number__iexact=username) | Q(email__iexact=username)
+            users_qs = users.filter(q)
 
-        resolved_users = User.objects.none()
+        # Parse avalible filter if provided
+        avalible_value = None
+        if avalible_param in ('1', 'true', 'yes'):
+            avalible_value = True
+        elif avalible_param in ('0', 'false', 'no'):
+            avalible_value = False
 
-        # Priority resolution by strong identifiers
-        if barcode:
-            resolved_users = User.objects.filter(barcode_number__iexact=barcode)
-        elif user_id.isdigit():
-            resolved_users = User.objects.filter(id=int(user_id))
-        elif email:
-            resolved_users = User.objects.filter(email__iexact=email)
-        elif username:
-            # Broad pre-filter
-            parts = [p for p in username.split() if p]
-            pre_q = Q(first_name__icontains=username) | Q(last_name__icontains=username)
-            if parts:
-                pre_q |= Q(first_name__icontains=parts[0]) | Q(last_name__icontains=parts[-1])
-            candidates = User.objects.filter(pre_q)
-
-            # Exact-like match on normalized "first last"
-            target = _norm(username)
-            exact_ids = [u.id for u in candidates if _norm(f"{u.first_name} {u.last_name}") == target]
-
-            if exact_ids:
-                resolved_users = User.objects.filter(id__in=exact_ids)
+        # Wishlist branch
+        if users_qs is not None and wishlist_param in ('1', 'true', 'yes'):
+            logs = BooksLog.objects.filter(wishlist__in=users_qs).distinct()
+            if search:
+                logs = logs.filter(
+                    Q(book_title__icontains=search) |
+                    Q(auther__icontains=search) |
+                    Q(book_barcode__icontains=search)
+                )
+        # Issued-books branch
+        elif users_qs is not None:
+            logs = logs.filter(user__in=users_qs)
+            # default to issued (avalible=False) unless explicitly overridden
+            if avalible_value is None:
+                logs = logs.filter(avalible=False)
             else:
-                # Fallback to candidates if no exact normalized match
-                resolved_users = candidates
-
-        if resolved_users.exists():
-            # User-scoped issued books only
-            logs = logs.filter(user__in=resolved_users, avalible=False)
+                logs = logs.filter(avalible=avalible_value)
             if search:
                 logs = logs.filter(
                     Q(book_title__icontains=search) |
@@ -262,7 +275,9 @@ def book_log_list(request):
                     Q(book_barcode__icontains=search)
                 )
         else:
-            # No user identified: global listing (for general search)
+            # Global listing/search (no user identified)
+            if avalible_value is not None:
+                logs = logs.filter(avalible=avalible_value)
             if search:
                 logs = logs.filter(
                     Q(book_title__icontains=search) |
@@ -277,9 +292,72 @@ def book_log_list(request):
                 'book_author': getattr(log, 'auther', ''),
                 'issued_date': getattr(log, 'issued_date', None),
                 'return_date': getattr(log, 'return_date', None),
-                # Include owner name to help client UX/debug
                 'username': (f"{getattr(log.user, 'first_name', '')} {getattr(log.user, 'last_name', '')}").strip() if getattr(log, 'user', None) else '',
             })
         return JsonResponse(data, safe=False)
 
     return JsonResponse({'error': 'Invalid request'}, status=400)
+
+@csrf_exempt
+def user_wishlist(request):
+    """
+    GET wishlist items for a user resolved from the User table.
+    Accepts one of:
+      - ?barcode= or ?barcode_number=
+      - ?user_id=
+      - ?email=
+      - ?username= (full name or parts)
+    Optional:
+      - ?search= (title/author/barcode)
+    """
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Invalid request'}, status=400)
+
+    search = (request.GET.get('search') or '').strip()
+    username = (request.GET.get('username') or '').strip()
+    barcode = (request.GET.get('barcode') or request.GET.get('barcode_number') or '').strip()
+    email = (request.GET.get('email') or '').strip()
+    user_id = (request.GET.get('user_id') or '').strip()
+
+    # Resolve user(s) from User table
+    users_qs = User.objects.none()
+    q = Q()
+    if barcode:
+        q |= Q(barcode_number__iexact=barcode)
+    if user_id.isdigit():
+        q |= Q(id=int(user_id))
+    if email:
+        q |= Q(email__iexact=email)
+    if username:
+        parts = [p for p in username.split() if p]
+        if len(parts) >= 2:
+            q |= (Q(first_name__iexact=parts[0]) & Q(last_name__iexact=parts[-1]))
+        q |= Q(first_name__icontains=username) | Q(last_name__icontains=username)
+    if q:
+        users_qs = User.objects.filter(q)
+
+    if not users_qs.exists():
+        return JsonResponse([], safe=False)
+
+    # Fetch BooksLog entries where wishlist includes the resolved users
+    logs = BooksLog.objects.filter(wishlist__in=users_qs).distinct().order_by('-issued_date')
+
+    if search:
+        logs = logs.filter(
+            Q(book_title__icontains=search) |
+            Q(auther__icontains=search) |
+            Q(book_barcode__icontains=search)
+        )
+
+    data = []
+    for log in logs:
+        data.append({
+            'book_title': getattr(log, 'book_title', ''),
+            'book_author': getattr(log, 'auther', ''),
+            'issued_date': getattr(log, 'issued_date', None),
+            'return_date': getattr(log, 'return_date', None),
+            'book_barcode': getattr(log, 'book_barcode', ''),
+            # include wishlist users for debugging if needed
+            'wishlist_users': [f"{u.first_name} {u.last_name}".strip() for u in log.wishlist.all()],
+        })
+    return JsonResponse(data, safe=False)
