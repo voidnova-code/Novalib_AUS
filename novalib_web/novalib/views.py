@@ -3,7 +3,9 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.core.mail import send_mail
 from novalib.models import User, Login, Notification, DeveloperNotification
+from novalib.models import BooksLog  # fixed import
 from django.utils.timezone import now, timedelta
+from django.db.models import Q  # add this
 import json
 import random
 
@@ -21,19 +23,70 @@ def send_otp(request):
         barcode = data.get('barcode')
         otp = generate_otp()
         try:
-            user = User.objects.get(barcode_number=barcode)  # Updated field name
+            user = User.objects.get(barcode_number=barcode)
             email = user.email
-            subject = "NovaLib OTP Verification Code"
+            subject = "NovaLib verification code"
+            
+            # Plain text message remains the same
             message = (
-                f"Dear {user.first_name},\n\n"
-                f"Your One-Time Password (OTP) for accessing NovaLib is: {otp}\n\n"
-                f"This OTP is valid for 5 minutes. Please do not share this code with anyone.\n\n"
-                f"If you did not request this OTP, please ignore this email.\n\n"
-                f"Thank you,\n"
+                f"Please verify your identity, {user.first_name}\n\n"
+                f"Here is your NovaLib verification code:\n\n"
+                f"{otp}\n\n"
+                f"This code is valid for 15 minutes and can only be used once.\n\n"
+                f"Please don't share this code with anyone: we'll never ask for it on the phone "
+                f"or via email.\n\n"
+                f"Thanks,\n"
                 f"The NovaLib Team"
             )
+            
+            # Updated HTML message with copy functionality
+            html_message = f"""
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <img src="https://auslogo.link" alt="NovaLib Logo" style="display: block; margin: 0 auto; width: 50px;">
+                <h2 style="text-align: center; color: #333;">Please verify your identity, {user.first_name}</h2>
+                <div style="background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 5px; padding: 20px; margin: 20px 0;">
+                    <p style="text-align: center; margin-bottom: 10px;">Here is your NovaLib verification code:</p>
+                    
+                    <!-- Code container with copy button styling -->
+                    <div style="position: relative; max-width: 300px; margin: 0 auto;">
+                        <!-- The OTP code with special styling -->
+                        <div style="background-color: #fff; border: 1px solid #ddd; border-radius: 4px; padding: 12px; 
+                                    text-align: center; font-family: monospace; font-size: 24px; font-weight: bold; 
+                                    letter-spacing: 4px; margin-bottom: 10px;">
+                            {otp}
+                        </div>
+                        
+                        <!-- Copy button with instructions -->
+                        <a href="https://novalib-aus.web.app/copy?code={otp}" 
+                           style="display: block; text-align: center; background-color: #2EA44F; color: white; 
+                                  text-decoration: none; padding: 8px 16px; border-radius: 4px; font-weight: bold; 
+                                  margin: 0 auto; width: 100px;">
+                            Copy Code
+                        </a>
+                        <p style="text-align: center; color: #666; font-size: 12px; margin-top: 8px;">
+                            Click the button above to open a page where you can easily copy your code
+                        </p>
+                    </div>
+                </div>
+                <p>This code is valid for <strong>5 minutes</strong> and can only be used once.</p>
+                <p><strong>Please don't share this code with anyone:</strong> we'll never ask for it on the phone or via email.</p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                <p>Thanks,<br>The NovaLib Team</p>
+                
+                <!-- Alternative manual copy instructions -->
+                <div style="font-size: 12px; color: #666; margin-top: 20px;">
+                    <p>If the button doesn't work, you can manually copy this code: <strong>{otp}</strong></p>
+                </div>
+            </div>
+            """
+            
             from_email = "sayan.kumar.roy@aus.ac.in"
-            send_mail(subject, message, from_email, [email], fail_silently=False)
+            
+            # Send email with both text and HTML versions
+            from django.core.mail import EmailMultiAlternatives
+            msg = EmailMultiAlternatives(subject, message, from_email, [email])
+            msg.attach_alternative(html_message, "text/html")
+            msg.send(fail_silently=False)
 
             # Store OTP and timestamp in the database
             user.otp = otp
@@ -145,3 +198,33 @@ def notifications(request):
             "timestamp": timestamp,
         })
     return JsonResponse(data, safe=False)
+
+@csrf_exempt
+def book_log_list(request):
+    """
+    API endpoint to list/search issued books from BooksLog.
+    Supports ?search= query parameter for book title/author/barcode.
+    """
+    if request.method == 'GET':
+        search = (request.GET.get('search') or '').strip()
+        logs = BooksLog.objects.all().order_by('-issued_date')  # valid field
+
+        if search:
+            logs = logs.filter(
+                Q(book_title__icontains=search) |
+                Q(auther__icontains=search) |
+                Q(book_barcode__icontains=search)
+            )
+
+        data = []
+        for log in logs:
+            data.append({
+                'book_title': getattr(log, 'book_title', ''),
+                # Keep response key stable as 'book_author', sourced from 'auther'
+                'book_author': getattr(log, 'auther', ''),
+                'issued_date': getattr(log, 'issued_date', None),
+                'return_date': getattr(log, 'return_date', None),
+            })
+        return JsonResponse(data, safe=False)
+
+    return JsonResponse({'error': 'Invalid request'}, status=400)

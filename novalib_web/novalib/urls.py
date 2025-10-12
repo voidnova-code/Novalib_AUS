@@ -6,6 +6,7 @@ urlpatterns = [
     path('api/send-otp/', views.send_otp, name='send_otp'),
     path('api/verify-otp/', views.verify_otp, name='verify_otp'),
     path('notifications/', views.DeveloperNotifications, name='developer_notifications'),
-    path('library-notifications/', views.notifications, name='library_notifications'),  # <-- Add this line for library notifications
+    path('library-notifications/', views.notifications, name='library_notifications'),
+    path('book-log/', views.book_log_list, name='book_log_list'),  # <-- Add this line for book log API
     # ...existing code...
 ]
