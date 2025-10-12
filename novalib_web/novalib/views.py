@@ -203,27 +203,82 @@ def notifications(request):
 def book_log_list(request):
     """
     API endpoint to list/search issued books from BooksLog.
-    Supports ?search= query parameter for book title/author/barcode.
+    Supports user filters via:
+      - ?username= (full display name)
+      - ?barcode= or ?barcode_number=
+      - ?email=
+      - ?user_id=
+    And optional ?search= for title/author/barcode.
+    If a user is resolved, return only that user's issued books (avalible=False).
+    Otherwise, return global list (optionally filtered by ?search).
     """
     if request.method == 'GET':
         search = (request.GET.get('search') or '').strip()
-        logs = BooksLog.objects.all().order_by('-issued_date')  # valid field
+        username = (request.GET.get('username') or '').strip()
+        barcode = (request.GET.get('barcode') or request.GET.get('barcode_number') or '').strip()
+        email = (request.GET.get('email') or '').strip()
+        user_id = (request.GET.get('user_id') or '').strip()
 
-        if search:
-            logs = logs.filter(
-                Q(book_title__icontains=search) |
-                Q(auther__icontains=search) |
-                Q(book_barcode__icontains=search)
-            )
+        logs = BooksLog.objects.all().order_by('-issued_date')
+
+        # Resolve users from User table first
+        def _norm(s):
+            return ' '.join(str(s or '').split()).lower()
+
+        resolved_users = User.objects.none()
+
+        # Priority resolution by strong identifiers
+        if barcode:
+            resolved_users = User.objects.filter(barcode_number__iexact=barcode)
+        elif user_id.isdigit():
+            resolved_users = User.objects.filter(id=int(user_id))
+        elif email:
+            resolved_users = User.objects.filter(email__iexact=email)
+        elif username:
+            # Broad pre-filter
+            parts = [p for p in username.split() if p]
+            pre_q = Q(first_name__icontains=username) | Q(last_name__icontains=username)
+            if parts:
+                pre_q |= Q(first_name__icontains=parts[0]) | Q(last_name__icontains=parts[-1])
+            candidates = User.objects.filter(pre_q)
+
+            # Exact-like match on normalized "first last"
+            target = _norm(username)
+            exact_ids = [u.id for u in candidates if _norm(f"{u.first_name} {u.last_name}") == target]
+
+            if exact_ids:
+                resolved_users = User.objects.filter(id__in=exact_ids)
+            else:
+                # Fallback to candidates if no exact normalized match
+                resolved_users = candidates
+
+        if resolved_users.exists():
+            # User-scoped issued books only
+            logs = logs.filter(user__in=resolved_users, avalible=False)
+            if search:
+                logs = logs.filter(
+                    Q(book_title__icontains=search) |
+                    Q(auther__icontains=search) |
+                    Q(book_barcode__icontains=search)
+                )
+        else:
+            # No user identified: global listing (for general search)
+            if search:
+                logs = logs.filter(
+                    Q(book_title__icontains=search) |
+                    Q(auther__icontains=search) |
+                    Q(book_barcode__icontains=search)
+                )
 
         data = []
         for log in logs:
             data.append({
                 'book_title': getattr(log, 'book_title', ''),
-                # Keep response key stable as 'book_author', sourced from 'auther'
                 'book_author': getattr(log, 'auther', ''),
                 'issued_date': getattr(log, 'issued_date', None),
                 'return_date': getattr(log, 'return_date', None),
+                # Include owner name to help client UX/debug
+                'username': (f"{getattr(log.user, 'first_name', '')} {getattr(log.user, 'last_name', '')}").strip() if getattr(log, 'user', None) else '',
             })
         return JsonResponse(data, safe=False)
 
