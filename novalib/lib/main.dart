@@ -53,6 +53,7 @@ class MyApp extends StatelessWidget {
           final args = ModalRoute.of(context)?.settings.arguments;
           String username = 'User';
           bool useAltBackground = false;
+          String? userBarcode;
 
           if (args is Map<String, dynamic>) {
             // Defensive: fallback to 'User' if username is null or empty
@@ -62,6 +63,7 @@ class MyApp extends StatelessWidget {
                 ? args['username']
                 : 'User';
             useAltBackground = args['useAltBackground'] ?? false;
+            userBarcode = args['userBarcode'] as String?;
           } else if (args is String && args.isNotEmpty) {
             username = args;
           }
@@ -71,6 +73,7 @@ class MyApp extends StatelessWidget {
           return HomePage(
             useAltBackground: useAltBackground,
             username: username,
+            userBarcode: userBarcode,
           );
         },
         '/notifications': (context) => const NotificationPage(),

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'dart:ui'; // for ImageFilter.blur
+// removed dart:ui import (no direct usage of ImageFilter in this file)
 import 'config.dart'; // use shared config instead of importing main.dart
 import 'dart:async'; // Add this import for Timer
 import 'WishList_page/wishlist.dart'; // already imported
@@ -10,11 +10,13 @@ import 'WishList_page/wishlist.dart'; // already imported
 class HomePage extends StatefulWidget {
   final bool useAltBackground;
   final String username;
+  final String? userBarcode; // propagated from login for reliable lookups
 
   const HomePage({
     Key? key,
     required this.useAltBackground,
     required this.username,
+    this.userBarcode,
   }) : super(key: key);
 
   @override
@@ -523,13 +525,19 @@ class _HomePageState extends State<HomePage> {
           ? djangoBaseUrl.substring(0, djangoBaseUrl.length - 1)
           : djangoBaseUrl;
       final uname = Uri.encodeComponent(widget.username);
+      final barcode = widget.userBarcode != null
+          ? Uri.encodeComponent(widget.userBarcode!)
+          : '';
 
       // Try multiple identifiers, then global fallbacks
       final attempts = <Uri>[
         // Prefer issued items
+        if (barcode.isNotEmpty)
+          Uri.parse('$baseUrl/book-log/?barcode=$barcode&avalible=0'),
+        if (barcode.isNotEmpty)
+          Uri.parse('$baseUrl/book-log/?barcode=$barcode'),
         Uri.parse('$baseUrl/book-log/?username=$uname&avalible=0'),
         Uri.parse('$baseUrl/book-log/?username=$uname'),
-        Uri.parse('$baseUrl/book-log/?barcode=$uname&avalible=0'),
         Uri.parse('$baseUrl/book-log/?email=$uname&avalible=0'),
         if (int.tryParse(widget.username) != null)
           Uri.parse('$baseUrl/book-log/?user_id=${widget.username}&avalible=0'),
@@ -693,6 +701,7 @@ class _HomePageState extends State<HomePage> {
                             username: widget.username,
                             useAltBackground:
                                 widget.useAltBackground, // pass flag
+                            userBarcode: widget.userBarcode,
                           ),
                         );
                       },
@@ -755,7 +764,7 @@ class _HomePageState extends State<HomePage> {
                   colors: [
                     Colors.black.withOpacity(0.15),
                     Colors.black.withOpacity(0.35),
-                    Colors.black.withOpacity(0.6),
+                    Colors.black.withOpacity(0.60),
                   ],
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
@@ -1007,9 +1016,9 @@ class _HomePageState extends State<HomePage> {
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(28),
                                 borderSide: BorderSide(
-                                  color: Colors.white30,
+                                  color: Colors.white.withOpacity(0.30),
                                   width: 1,
-                                ), // Add subtle border when focused
+                                ),
                               ),
                             ),
                             onChanged: (value) {
@@ -1217,15 +1226,13 @@ class _HomePageState extends State<HomePage> {
                                               bottom: 12,
                                             ),
                                             decoration: BoxDecoration(
-                                              color:
-                                                  const Color.fromARGB(
-                                                    255,
-                                                    30,
-                                                    30,
-                                                    30,
-                                                  ).withOpacity(
-                                                    0.8,
-                                                  ), // Darker background
+                                              color: const Color.fromARGB(
+                                                255,
+                                                30,
+                                                30,
+                                                30,
+                                              ).withOpacity(0.8),
+                                              // Darker background
                                               borderRadius:
                                                   BorderRadius.circular(14),
                                               border: Border.all(

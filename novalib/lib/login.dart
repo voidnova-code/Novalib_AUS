@@ -161,12 +161,15 @@ class _ForestLoginPageState extends State<ForestLoginPage>
 
           // Ensure widget is still in tree before navigating
           if (!mounted) return;
+          // Pass along the barcode used for login so downstream pages
+          // (like Wishlist) can reliably resolve the user.
           Navigator.pushReplacementNamed(
             context,
             '/home',
             arguments: {
               'username': resolvedName,
               'useAltBackground': useAltBackground,
+              'userBarcode': barcode,
             },
           );
         } else {

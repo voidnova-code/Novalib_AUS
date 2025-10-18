@@ -7,22 +7,26 @@ import 'package:flutter/services.dart';
 class WishListPage extends StatefulWidget {
   final String username;
   final bool useAltBackground; // NEW
+  final String? userBarcode; // NEW: precise identifier for backend
 
   const WishListPage({
     Key? key,
     required this.username,
     required this.useAltBackground, // NEW
+    this.userBarcode, // NEW
   }) : super(key: key);
 
   // allow navigation via route with arguments Map
   static Route route({
     required String username,
     required bool useAltBackground, // NEW
+    String? userBarcode, // NEW
   }) {
     return MaterialPageRoute(
       builder: (_) => WishListPage(
         username: username,
         useAltBackground: useAltBackground, // NEW
+        userBarcode: userBarcode, // NEW
       ),
     );
   }
@@ -78,18 +82,26 @@ class _WishListPageState extends State<WishListPage> {
       }
 
       // Candidate attempts using User-table resolution, then legacy book-log fallback
-      final uname = Uri.encodeComponent(widget.username);
+      final uname = widget.username.trim();
+      final barcode = (widget.userBarcode ?? '').trim();
+      final unameEnc = Uri.encodeComponent(uname);
+      final barcodeEnc = Uri.encodeComponent(barcode);
+
       final attempts = <Uri>[
-        // Resolve via User table first (username may be display name or login username)
-        Uri.parse('$baseUrl/user-wishlist/?username=$uname'),
-        Uri.parse('$baseUrl/user-wishlist/?barcode=$uname'),
-        Uri.parse('$baseUrl/user-wishlist/?email=$uname'),
-        if (int.tryParse(widget.username) != null)
-          Uri.parse('$baseUrl/user-wishlist/?user_id=${widget.username}'),
+        // Resolve via User table first with the most reliable identifier
+        if (barcode.isNotEmpty)
+          Uri.parse('$baseUrl/user-wishlist/?barcode=$barcodeEnc'),
+        // Then try other identifiers
+        Uri.parse('$baseUrl/user-wishlist/?username=$unameEnc'),
+        Uri.parse('$baseUrl/user-wishlist/?email=$unameEnc'),
+        if (int.tryParse(uname) != null)
+          Uri.parse('$baseUrl/user-wishlist/?user_id=$uname'),
+
         // Fallback to existing book-log wishlist filter (if backend supports it)
-        Uri.parse('$baseUrl/book-log/?username=$uname&wishlist=1'),
-        Uri.parse('$baseUrl/book-log/?barcode=$uname&wishlist=1'),
-        Uri.parse('$baseUrl/book-log/?email=$uname&wishlist=1'),
+        if (barcode.isNotEmpty)
+          Uri.parse('$baseUrl/book-log/?barcode=$barcodeEnc&wishlist=1'),
+        Uri.parse('$baseUrl/book-log/?username=$unameEnc&wishlist=1'),
+        Uri.parse('$baseUrl/book-log/?email=$unameEnc&wishlist=1'),
       ];
 
       List<Map<String, String>> found = [];
@@ -122,9 +134,9 @@ class _WishListPageState extends State<WishListPage> {
 
   // Reuse lightweight glass decoration
   BoxDecoration _glassBoxDecoration() => BoxDecoration(
-    color: const Color.fromARGB(255, 0, 0, 0).withOpacity(0.35),
+    color: const Color.fromARGB(255, 0, 0, 0).withValues(alpha: 0.35),
     borderRadius: BorderRadius.circular(14),
-    border: Border.all(color: Colors.white.withOpacity(0.18), width: 1),
+    border: Border.all(color: Colors.white.withValues(alpha: 0.18), width: 1),
   );
 
   @override
@@ -165,9 +177,9 @@ class _WishListPageState extends State<WishListPage> {
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
-                    Colors.black.withOpacity(0.15),
-                    Colors.black.withOpacity(0.35),
-                    Colors.black.withOpacity(0.6),
+                    Colors.black.withValues(alpha: 0.15),
+                    Colors.black.withValues(alpha: 0.35),
+                    Colors.black.withValues(alpha: 0.60),
                   ],
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
@@ -264,7 +276,9 @@ class _WishListPageState extends State<WishListPage> {
                                   Text(
                                     book['author'] ?? '',
                                     style: TextStyle(
-                                      color: Colors.white.withOpacity(0.75),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.75,
+                                      ),
                                       fontSize: 13,
                                     ),
                                     maxLines: 1,
