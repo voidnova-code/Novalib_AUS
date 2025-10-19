@@ -2,7 +2,7 @@
 
 // Django backend base URL
 const String djangoBaseUrl =
-    'http://192.168.182.28:8000'; // Update this to your server's URL
+    'https://voidnova.pythonanywhere.com/'; // Update this to your server's URL
 
 // Search configuration
 const int searchDebounceMs = 600; // Wait 600 milliseconds before searching
