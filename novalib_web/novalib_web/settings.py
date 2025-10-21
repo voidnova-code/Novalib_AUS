@@ -11,7 +11,7 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-your-secret-ke
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True') == 'True'
 PYTHONANYWHERE_DOMAIN = os.environ.get('PYTHONANYWHERE_DOMAIN', 'voidnova.pythonanywhere.com')
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', "voidnova.pythonanywhere.com"]
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', "voidnova.pythonanywhere.com","10.88.206.108"]
 if os.environ.get('DJANGO_ALLOWED_HOSTS'):
     ALLOWED_HOSTS.extend(os.environ.get('DJANGO_ALLOWED_HOSTS').split(','))
 if DEBUG:
@@ -66,7 +66,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': "novalib_db",  
         'USER': "root",        
-        'PASSWORD': "Sayan@kumar1234",
+        'PASSWORD': "MyStrongPass123!",
         'HOST': "localhost",         
         'PORT': '3306',
         'OPTIONS': {

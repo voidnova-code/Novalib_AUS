@@ -6,6 +6,7 @@ import 'Notification_pages/Notification_Image.dart';
 import 'AboutUS_pages/About_NovaLib.dart';
 import 'config.dart'; // import shared base URL
 import 'package:http/http.dart' as http;
+import 'app_shell.dart';
 
 Future<void> connectToDjangoServer() async {
   final candidates = <String>[
@@ -45,10 +46,13 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'NovaLib',
-      theme: ThemeData(primarySwatch: Colors.blue),
-      initialRoute: '/login',
+      theme: ThemeData(primarySwatch: Colors.blue, useMaterial3: true),
+      // Keep initial route as /home but now it opens the AppShell (with bottom nav)
+      initialRoute: '/home',
       routes: {
         '/login': (context) => ForestLoginPage(apiBaseUrl: djangoBaseUrl),
+
+        // NEW: /home now loads the bottom-nav shell that hosts Home, Issued, Pay Fine tabs
         '/home': (context) {
           final args = ModalRoute.of(context)?.settings.arguments;
           String username = 'User';
@@ -56,7 +60,6 @@ class MyApp extends StatelessWidget {
           String? userBarcode;
 
           if (args is Map<String, dynamic>) {
-            // Defensive: fallback to 'User' if username is null or empty
             username =
                 (args['username'] is String &&
                     (args['username'] as String).isNotEmpty)
@@ -67,15 +70,16 @@ class MyApp extends StatelessWidget {
           } else if (args is String && args.isNotEmpty) {
             username = args;
           }
-          // If username is still empty, fallback
           if (username.isEmpty) username = 'User';
 
-          return HomePage(
-            useAltBackground: useAltBackground,
+          return AppShell(
             username: username,
+            useAltBackground: useAltBackground,
             userBarcode: userBarcode,
           );
         },
+
+        // Keep your other routes unchanged
         '/notifications': (context) => const NotificationPage(),
         '/notification_image': (context) => const NotificationImagePage(),
         '/about_novalib': (context) {
