@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../config.dart';
-import '../theme.dart';
+import '../config.dart'; // use shared base URL from config
 
 class NotificationPage extends StatefulWidget {
   const NotificationPage({Key? key}) : super(key: key);
@@ -16,6 +15,18 @@ class _NotificationPageState extends State<NotificationPage> {
   List<Map<String, dynamic>> libraryNotifications = [];
   bool isLoading = true;
   bool isLibraryLoading = true;
+  bool useAltBackground = false; // add this
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final args = ModalRoute.of(context)?.settings.arguments;
+    if (args is Map<String, dynamic>) {
+      useAltBackground = args['useAltBackground'] ?? false;
+      // Trigger rebuild only if needed
+      // setState not required here as didChangeDependencies precedes first build
+    }
+  }
 
   String get _baseUrl => djangoBaseUrl.endsWith('/')
       ? djangoBaseUrl.substring(0, djangoBaseUrl.length - 1)
@@ -23,6 +34,7 @@ class _NotificationPageState extends State<NotificationPage> {
 
   String _fullImageUrl(String raw) {
     if (raw.startsWith('http')) return raw;
+    // ensure exactly one slash between base and path
     if (raw.startsWith('/')) return '$_baseUrl$raw';
     return '$_baseUrl/$raw';
   }
@@ -40,9 +52,14 @@ class _NotificationPageState extends State<NotificationPage> {
       if (!mounted) return;
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
-        setState(() => notifications = data.cast<Map<String, dynamic>>());
+        setState(() {
+          notifications = data.cast<Map<String, dynamic>>();
+        });
+      } else {
+        debugPrint('Notifications fetch failed: ${response.statusCode}');
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Error fetching notifications: $e');
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
@@ -56,11 +73,16 @@ class _NotificationPageState extends State<NotificationPage> {
       if (!mounted) return;
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
-        setState(
-          () => libraryNotifications = data.cast<Map<String, dynamic>>(),
+        setState(() {
+          libraryNotifications = data.cast<Map<String, dynamic>>();
+        });
+      } else {
+        debugPrint(
+          'Library notifications fetch failed: ${response.statusCode}',
         );
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Error fetching library notifications: $e');
     } finally {
       if (mounted) setState(() => isLibraryLoading = false);
     }
@@ -76,29 +98,51 @@ class _NotificationPageState extends State<NotificationPage> {
     await Future.wait([fetchNotifications(), fetchLibraryNotifications()]);
   }
 
-  Widget _notifCard(Map<String, dynamic> n, {required String avatarInitial}) {
-    final senderName = n['uploaded_by'] ?? 'Sender';
-    final message = n['message'] ?? '';
-    final String? imageUrl = n['uploaded_image'] ?? n['image_url'];
-    final timestamp = n['timestamp'] ?? '';
-    final title = n['title'] ?? '';
+  Widget _buildNotificationBox(
+    Map<String, dynamic> notification, {
+    String avatarInitial = "D",
+  }) {
+    final String senderName = notification['uploaded_by'] ?? 'Sender Name';
+    final String message = notification['message'] ?? '';
+    final String? imageUrl =
+        notification['uploaded_image'] ?? notification['image_url'];
+    final String timestamp = notification['timestamp'] ?? '';
+    final String title = notification['title'] ?? '';
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       padding: const EdgeInsets.all(12),
-      decoration: AppDecorations.cardPearl(),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(
+          0.6,
+        ), // Changed from white to semi-transparent black
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(
+              0.2,
+            ), // Darker shadow for better contrast
+            blurRadius: 4,
+            offset: Offset(0, 2),
+          ),
+        ],
+        border: Border.all(
+          color: Colors.white.withOpacity(0.1),
+        ), // Subtle white border
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               CircleAvatar(
                 radius: 16,
-                backgroundColor: AppColors.accent.withOpacity(0.15),
+                backgroundColor: Colors.grey[700], // Darker avatar background
                 child: Text(
                   avatarInitial,
-                  style: const TextStyle(
-                    color: AppColors.ink,
+                  style: TextStyle(
+                    color: Colors.white, // White text on dark background
                     fontWeight: FontWeight.bold,
                     fontSize: 14,
                   ),
@@ -111,8 +155,8 @@ class _NotificationPageState extends State<NotificationPage> {
                   children: [
                     Text(
                       senderName,
-                      style: const TextStyle(
-                        color: AppColors.ink,
+                      style: TextStyle(
+                        color: Colors.white, // White text
                         fontWeight: FontWeight.bold,
                         fontSize: 15,
                       ),
@@ -120,10 +164,10 @@ class _NotificationPageState extends State<NotificationPage> {
                     const SizedBox(height: 2),
                     Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
-                        color: AppColors.ink,
+                        color: Colors.white, // White text
                       ),
                     ),
                   ],
@@ -132,11 +176,13 @@ class _NotificationPageState extends State<NotificationPage> {
             ],
           ),
           if (message.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            const SizedBox(height: 2),
+            const SizedBox(height: 6),
             Text(
               message,
-              style: const TextStyle(fontSize: 15, color: AppColors.muted),
+              style: TextStyle(
+                fontSize: 15,
+                color: Colors.white70,
+              ), // Light white text
             ),
           ],
           if (imageUrl != null && imageUrl.isNotEmpty) ...[
@@ -156,7 +202,7 @@ class _NotificationPageState extends State<NotificationPage> {
                   height: 100,
                   width: double.infinity,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
+                  errorBuilder: (context, error, stackTrace) => Container(
                     height: 100,
                     color: Colors.grey[200],
                     child: const Icon(Icons.broken_image, color: Colors.grey),
@@ -165,10 +211,10 @@ class _NotificationPageState extends State<NotificationPage> {
               ),
             ),
           ],
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Text(
             timestamp,
-            style: const TextStyle(fontSize: 12, color: AppColors.muted),
+            style: const TextStyle(fontSize: 12, color: Colors.white54),
           ),
         ],
       ),
@@ -180,7 +226,7 @@ class _NotificationPageState extends State<NotificationPage> {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: Colors.black.withOpacity(0.35),
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
@@ -198,104 +244,160 @@ class _NotificationPageState extends State<NotificationPage> {
       ),
       body: Stack(
         children: [
-          const Positioned.fill(child: AnimatedBg()),
+          // Background image same as HomePage
+          Positioned.fill(
+            child: Image.asset(
+              useAltBackground
+                  ? 'assets/background2.jpg'
+                  : 'assets/background1.jpg',
+              fit: BoxFit.cover,
+            ),
+          ),
+          // Gradient overlay for readability
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.black.withOpacity(0.10),
+                    Colors.black.withOpacity(0.25),
+                    Colors.black.withOpacity(0.45),
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+            ),
+          ),
+          // Content
           SafeArea(
             child: RefreshIndicator(
-              onRefresh: refreshAll,
+              onRefresh: () async {
+                await refreshAll();
+              },
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: MediaQuery.of(context).size.height,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Developer notification section
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        child: Text(
+                          'From Developer',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: const Color.fromARGB(255, 255, 255, 255),
+                          ),
+                        ),
                       ),
-                      child: Text(
-                        'From Developer',
-                        style: TextStyle(fontSize: 16, color: Colors.white),
-                      ),
-                    ),
-                    Container(
-                      margin: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.06),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: isLoading
-                          ? const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 40),
-                              child: Center(child: CircularProgressIndicator()),
-                            )
-                          : notifications.isEmpty
-                          ? const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 40),
-                              child: Center(
-                                child: Text(
-                                  'No new notifications',
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    color: Colors.white,
+                      Container(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.35),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: isLoading
+                            ? Center(
+                                child: Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 40),
+                                  child: CircularProgressIndicator(),
+                                ),
+                              )
+                            : notifications.isEmpty
+                            ? Center(
+                                child: Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 40),
+                                  child: Text(
+                                    'No new notifications',
+                                    style: TextStyle(
+                                      fontSize: 24,
+                                      color: Colors
+                                          .white, // Changed from Colors.black to Colors.white
+                                    ),
                                   ),
                                 ),
+                              )
+                            : Column(
+                                children: notifications
+                                    .map(
+                                      (n) => _buildNotificationBox(
+                                        n,
+                                        avatarInitial: "D",
+                                      ),
+                                    )
+                                    .toList(),
                               ),
-                            )
-                          : Column(
-                              children: notifications
-                                  .map((n) => _notifCard(n, avatarInitial: 'D'))
-                                  .toList(),
-                            ),
-                    ),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
                       ),
-                      child: Text(
-                        'From library',
-                        style: TextStyle(fontSize: 16, color: Colors.white),
+                      // Library section label below developer section
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        child: Text(
+                          'From library',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: const Color.fromARGB(255, 255, 255, 255),
+                          ),
+                        ),
                       ),
-                    ),
-                    Container(
-                      margin: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.06),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: isLibraryLoading
-                          ? const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 40),
-                              child: Center(child: CircularProgressIndicator()),
-                            )
-                          : libraryNotifications.isEmpty
-                          ? const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 40),
-                              child: Center(
-                                child: Text(
-                                  'No library notifications',
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    color: Colors.white,
+                      Container(
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.35),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: isLibraryLoading
+                            ? Center(
+                                child: Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 40),
+                                  child: CircularProgressIndicator(),
+                                ),
+                              )
+                            : libraryNotifications.isEmpty
+                            ? Center(
+                                child: Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 40),
+                                  child: Text(
+                                    'No library notifications',
+                                    style: TextStyle(
+                                      fontSize: 24,
+                                      color: Colors
+                                          .white, // Changed from Colors.black54 to Colors.white
+                                    ),
                                   ),
                                 ),
+                              )
+                            : Column(
+                                children: libraryNotifications
+                                    .map(
+                                      (n) => _buildNotificationBox(
+                                        n,
+                                        avatarInitial: "L",
+                                      ),
+                                    )
+                                    .toList(),
                               ),
-                            )
-                          : Column(
-                              children: libraryNotifications
-                                  .map((n) => _notifCard(n, avatarInitial: 'L'))
-                                  .toList(),
-                            ),
-                    ),
-                  ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

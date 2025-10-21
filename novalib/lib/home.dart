@@ -2,24 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+// removed dart:ui import (no direct usage of ImageFilter in this file)
 import 'config.dart'; // use shared config instead of importing main.dart
 import 'dart:async'; // Add this import for Timer
 import 'WishList_page/wishlist.dart'; // already imported
-import 'pages/issued_books_page.dart'; // added
-import 'pages/pay_fine_page.dart'; // added
-
-// Two-color mixed background (aesthetic gradient)
-// Feel free to tweak these four colors; the background animates between pairs.
-const _bgA1 = Color.fromARGB(255, 193, 241, 151);
-const _bgA2 = Color.fromARGB(255, 150, 196, 118);
-const _bgB1 = Color.fromARGB(255, 228, 185, 204);
-const _bgB2 = Color(0xFFF472B6);
-
-// Text colors for light pastel cards
-const _ink = Color(0xFF1F2544);
-const _muted = Color(0xFF6B7280);
-// Accent
-const _accent = Color(0xFF5B6BFF);
 
 class HomePage extends StatefulWidget {
   final bool useAltBackground;
@@ -68,21 +54,22 @@ class _HomePageState extends State<HomePage> {
       debugPrint('Error opening drawer: $e');
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Could not open menu')));
+      ).showSnackBar(SnackBar(content: Text('Could not open menu')));
     }
   }
 
   // Launch website robustly
   Future<void> _launchWebsite(Uri url) async {
     try {
+      // Try default mode
       bool launched = await launchUrl(url, mode: LaunchMode.platformDefault);
       if (!launched) {
+        // Fallback to external browser
         launched = await launchUrl(url, mode: LaunchMode.externalApplication);
       }
       if (!launched) {
-        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
               'Could not open the website. Please check your internet connection.',
             ),
@@ -90,7 +77,6 @@ class _HomePageState extends State<HomePage> {
         );
       }
     } catch (e) {
-      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Launch error: ${e.toString()}')));
@@ -119,7 +105,7 @@ class _HomePageState extends State<HomePage> {
             children: [
               CircleAvatar(
                 radius: 34,
-                backgroundColor: _accent,
+                backgroundColor: const Color(0xFF5B6BFF),
                 child: Text(
                   initial,
                   style: const TextStyle(
@@ -135,7 +121,6 @@ class _HomePageState extends State<HomePage> {
                 style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
-                  color: _ink,
                 ),
               ),
               const SizedBox(height: 6),
@@ -176,6 +161,7 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _fetchIssuedBooks();
+    // Hide dropdown when focus leaves the search field
     _searchFocusNode.addListener(() {
       if (!_searchFocusNode.hasFocus) {
         _hideSuggestionsOverlay();
@@ -196,6 +182,7 @@ class _HomePageState extends State<HomePage> {
   void _onSearchChanged(String query) {
     _searchQuery = query;
 
+    // Cancel any previous debounce timer
     if (_debounce?.isActive ?? false) _debounce!.cancel();
 
     if (query.trim().isEmpty) {
@@ -203,8 +190,11 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
+    // Use a shorter debounce for suggestions (300ms)
     _debounce = Timer(const Duration(milliseconds: 300), () {
       if (!mounted) return;
+
+      // Fetch suggestions as user types
       _fetchSearchSuggestions(query);
     });
   }
@@ -222,24 +212,30 @@ class _HomePageState extends State<HomePage> {
           ? djangoBaseUrl.substring(0, djangoBaseUrl.length - 1)
           : djangoBaseUrl;
 
+      // Use the suggestions endpoint - modify this to match your API
       final url = Uri.parse(
         '$baseUrl/book-suggestions/?search=${Uri.encodeComponent(query)}',
       );
 
-      final response = await http.get(url).timeout(const Duration(seconds: 2));
+      final response = await http
+          .get(url)
+          .timeout(const Duration(seconds: 2)); // Short timeout for suggestions
 
       if (!mounted) return;
 
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
 
+        // Extract book titles for suggestions
         setState(() {
           _searchSuggestions = data
               .map<String>((item) => item['book_title']?.toString() ?? '')
               .where((title) => title.isNotEmpty)
               .toList();
 
+          // If no suggestions endpoint available, fallback to titles from main search
           if (_searchSuggestions.isEmpty) {
+            // Try to extract titles from the book-log endpoint as fallback
             _fetchFallbackSuggestions(query);
           } else {
             _showSuggestions = true;
@@ -250,10 +246,12 @@ class _HomePageState extends State<HomePage> {
           }
         });
       } else {
+        // Fallback to the main endpoint if suggestions endpoint fails
         _fetchFallbackSuggestions(query);
       }
     } catch (e) {
       debugPrint('Fetch suggestions error: $e');
+      // Fallback to the main endpoint if suggestions endpoint fails
       _fetchFallbackSuggestions(query);
     }
   }
@@ -276,6 +274,7 @@ class _HomePageState extends State<HomePage> {
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
 
+        // Extract book titles for suggestions
         setState(() {
           _searchSuggestions = data
               .map<String>((item) => item['book_title']?.toString() ?? '')
@@ -290,17 +289,24 @@ class _HomePageState extends State<HomePage> {
           }
         });
       } else {
-        setState(() => _isSearchLoading = false);
+        setState(() {
+          _isSearchLoading = false;
+        });
       }
     } catch (e) {
       debugPrint('Fallback suggestions error: $e');
-      if (mounted) setState(() => _isSearchLoading = false);
+      if (mounted) {
+        setState(() {
+          _isSearchLoading = false;
+        });
+      }
     }
   }
 
-  // Simple search implementation
+  // A much simpler search implementation
   Future<void> _executeSimpleSearch(String query) async {
     try {
+      // Only show search loader; do not touch issued-books loader
       setState(() {
         _isSearchLoading = true;
         _hideSuggestionsOverlay();
@@ -321,6 +327,7 @@ class _HomePageState extends State<HomePage> {
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
 
+        // Update only search results; do NOT modify _issuedBooks
         setState(() {
           _searchResults = data
               .map<Map<String, String>>(
@@ -340,7 +347,9 @@ class _HomePageState extends State<HomePage> {
         });
       } else {
         if (!mounted) return;
-        setState(() => _isSearchLoading = false);
+        setState(() {
+          _isSearchLoading = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error searching books: ${response.statusCode}'),
@@ -350,32 +359,39 @@ class _HomePageState extends State<HomePage> {
     } catch (e) {
       debugPrint('Search error: $e');
       if (!mounted) return;
-      setState(() => _isSearchLoading = false);
+      setState(() {
+        _isSearchLoading = false;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Search error: Network or server issue')),
       );
     }
   }
 
-  // Suggestions overlay
+  // Add new method to build search suggestions overlay
   void _showSearchSuggestionsOverlay() {
-    _hideSuggestionsOverlay();
+    _hideSuggestionsOverlay(); // Remove any existing overlay
 
     final overlay = Overlay.of(context);
 
     _suggestionsOverlay = OverlayEntry(
       builder: (context) => Positioned(
-        width: MediaQuery.of(context).size.width - 32,
-        top: MediaQuery.of(context).padding.top + 190,
+        width: MediaQuery.of(context).size.width - 32, // Match search bar width
+        top:
+            MediaQuery.of(context).padding.top +
+            190, // Move further down below search bar
         left: 16,
         child: CompositedTransformFollower(
           link: _layerLink,
           showWhenUnlinked: false,
-          offset: const Offset(0.0, 30.0),
+          offset: const Offset(
+            0.0,
+            30.0,
+          ), // Increase this offset to move suggestions down
           child: Material(
             elevation: 8,
             borderRadius: BorderRadius.circular(12),
-            color: const Color(0xFF2A2A2A),
+            color: const Color(0xFF2A2A2A), // Dark background for dropdown
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 8),
               constraints: BoxConstraints(
@@ -444,14 +460,22 @@ class _HomePageState extends State<HomePage> {
     overlay.insert(_suggestionsOverlay!);
   }
 
+  // Update the search suggestions functionality
   void _showSuggestionsOverlay() {
+    // Instead of generating sample data, we'll use the actual suggestions from the API
     if (_searchQuery.trim().isNotEmpty && _searchSuggestions.isNotEmpty) {
-      setState(() => _showSuggestions = true);
+      setState(() {
+        _showSuggestions = true;
+      });
+
+      // Show the overlay with suggestions
       _showSearchSuggestionsOverlay();
     }
   }
 
+  // Disable suggestions functionality entirely
   void _hideSuggestionsOverlay() {
+    // Just ensure the overlay is removed
     _suggestionsOverlay?.remove();
     _suggestionsOverlay = null;
   }
@@ -460,6 +484,7 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
     setState(() => _isBooksLoading = true);
 
+    // Parse list and extract possible owner and author fields
     List<Map<String, String>> parseList(dynamic body) {
       if (body is! List) return [];
       return body
@@ -506,6 +531,7 @@ class _HomePageState extends State<HomePage> {
 
       // Try multiple identifiers, then global fallbacks
       final attempts = <Uri>[
+        // Prefer issued items
         if (barcode.isNotEmpty)
           Uri.parse('$baseUrl/book-log/?barcode=$barcode&avalible=0'),
         if (barcode.isNotEmpty)
@@ -515,6 +541,7 @@ class _HomePageState extends State<HomePage> {
         Uri.parse('$baseUrl/book-log/?email=$uname&avalible=0'),
         if (int.tryParse(widget.username) != null)
           Uri.parse('$baseUrl/book-log/?user_id=${widget.username}&avalible=0'),
+        // Global fallbacks if backend ignores identifiers
         Uri.parse('$baseUrl/book-log/?avalible=0'),
         Uri.parse('$baseUrl/book-log/'),
       ];
@@ -526,6 +553,7 @@ class _HomePageState extends State<HomePage> {
         if (found.isNotEmpty) break;
       }
 
+      // Client-side filter: match owner tokens with username tokens if owner present
       if (found.isNotEmpty) {
         String norm(String s) => s.toLowerCase().trim();
         final userTok = norm(
@@ -539,12 +567,14 @@ class _HomePageState extends State<HomePage> {
               .split(RegExp(r'\s+'))
               .where((t) => t.isNotEmpty)
               .toSet();
+          // Keep if any token overlaps or direct contains either way
           final overlap = userTok.intersection(ownTok).isNotEmpty;
           return overlap ||
               owner.contains(norm(widget.username)) ||
               norm(widget.username).contains(owner);
         }).toList();
 
+        // If filtering removed everything (owner not matching tokens), fall back to original result
         if (filtered.isNotEmpty) {
           found = filtered;
         }
@@ -569,6 +599,7 @@ class _HomePageState extends State<HomePage> {
 
   // Add: unified refresh method for Home
   Future<void> _refreshHome() async {
+    // Close overlays and keep search bar untouched
     _hideSuggestionsOverlay();
     await _fetchIssuedBooks();
   }
@@ -599,7 +630,7 @@ class _HomePageState extends State<HomePage> {
                   children: [
                     CircleAvatar(
                       radius: 26,
-                      backgroundColor: _accent,
+                      backgroundColor: const Color(0xFF5B6BFF),
                       child: Text(
                         initial,
                         style: const TextStyle(
@@ -619,7 +650,6 @@ class _HomePageState extends State<HomePage> {
                             style: const TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
-                              color: _ink,
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -643,22 +673,13 @@ class _HomePageState extends State<HomePage> {
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   children: [
                     ListTile(
-                      leading: const Icon(Icons.person_outline, color: _ink),
-                      title: const Text(
-                        'Profile',
-                        style: TextStyle(color: _ink),
-                      ),
+                      leading: const Icon(Icons.person_outline),
+                      title: const Text('Profile'),
                       onTap: () => _openProfile(context),
                     ),
                     ListTile(
-                      leading: const Icon(
-                        Icons.notifications_outlined,
-                        color: _ink,
-                      ),
-                      title: const Text(
-                        'Notifications',
-                        style: TextStyle(color: _ink),
-                      ),
+                      leading: const Icon(Icons.notifications_outlined),
+                      title: const Text('Notifications'),
                       onTap: () {
                         Navigator.pushNamed(
                           context,
@@ -670,37 +691,29 @@ class _HomePageState extends State<HomePage> {
                       },
                     ),
                     ListTile(
-                      leading: const Icon(Icons.bookmark_border, color: _ink),
-                      title: const Text(
-                        'Wishlist',
-                        style: TextStyle(color: _ink),
-                      ),
+                      leading: const Icon(Icons.bookmark_border),
+                      title: const Text('Wishlist'),
                       onTap: () {
                         Navigator.pop(context);
                         Navigator.push(
                           context,
                           WishListPage.route(
                             username: widget.username,
-                            useAltBackground: widget.useAltBackground,
+                            useAltBackground:
+                                widget.useAltBackground, // pass flag
                             userBarcode: widget.userBarcode,
                           ),
                         );
                       },
                     ),
                     ListTile(
-                      leading: const Icon(Icons.person_outline, color: _ink),
-                      title: const Text(
-                        'Contacts us',
-                        style: TextStyle(color: _ink),
-                      ),
+                      leading: const Icon(Icons.person_outline),
+                      title: const Text('Contacts us'),
                       onTap: () => Navigator.pop(context),
                     ),
                     ListTile(
-                      leading: const Icon(Icons.info_outline, color: _ink),
-                      title: const Text(
-                        'About NovaLib',
-                        style: TextStyle(color: _ink),
-                      ),
+                      leading: const Icon(Icons.info_outline),
+                      title: const Text('About NovaLib'),
                       onTap: () {
                         Navigator.pop(context);
                         Navigator.pushNamed(
@@ -717,10 +730,10 @@ class _HomePageState extends State<HomePage> {
               ),
               const Divider(height: 1),
               ListTile(
-                leading: const Icon(Icons.logout, color: _ink),
+                leading: const Icon(Icons.logout, color: Colors.black),
                 title: const Text(
                   'Log out',
-                  style: TextStyle(fontWeight: FontWeight.w500, color: _ink),
+                  style: TextStyle(fontWeight: FontWeight.w500),
                 ),
                 onTap: () {
                   Navigator.pushReplacementNamed(context, '/login');
@@ -733,9 +746,32 @@ class _HomePageState extends State<HomePage> {
 
       body: Stack(
         children: [
-          // NEW: Animated two-color mixed gradient background with soft glow orbs
-          const Positioned.fill(child: _AnimatedBackground()),
-
+          // Background
+          Positioned.fill(
+            child: Image.asset(
+              widget.useAltBackground
+                  ? 'assets/background2.jpg'
+                  : 'assets/background1.jpg',
+              key: ValueKey(widget.useAltBackground),
+              fit: BoxFit.cover,
+            ),
+          ),
+          // Gradient overlay
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.black.withOpacity(0.15),
+                    Colors.black.withOpacity(0.35),
+                    Colors.black.withOpacity(0.60),
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+            ),
+          ),
           // Content
           Positioned.fill(
             child: SafeArea(
@@ -758,11 +794,15 @@ class _HomePageState extends State<HomePage> {
                         ),
                         child: Container(
                           decoration: BoxDecoration(
-                            // Lighter overlay so it competes less with cards
-                            color: Colors.black.withOpacity(0.12),
+                            color: const Color.fromARGB(
+                              255,
+                              0,
+                              0,
+                              0,
+                            ).withOpacity(0.35),
                             borderRadius: BorderRadius.circular(14),
                             border: Border.all(
-                              color: Colors.white.withOpacity(0.15),
+                              color: Colors.white.withOpacity(0.20),
                               width: 1,
                             ),
                           ),
@@ -800,7 +840,7 @@ class _HomePageState extends State<HomePage> {
                                         style: ButtonStyle(
                                           backgroundColor:
                                               MaterialStateProperty.all(
-                                                Colors.white.withOpacity(0.12),
+                                                Colors.white.withOpacity(0.15),
                                               ),
                                           shape: MaterialStateProperty.all(
                                             RoundedRectangleBorder(
@@ -889,7 +929,7 @@ class _HomePageState extends State<HomePage> {
                                   children: [
                                     CircleAvatar(
                                       radius: 20,
-                                      backgroundColor: _accent,
+                                      backgroundColor: const Color(0xFF5B6BFF),
                                       child: Text(
                                         initial,
                                         style: const TextStyle(
@@ -927,61 +967,65 @@ class _HomePageState extends State<HomePage> {
                             controller: _searchController,
                             focusNode: _searchFocusNode,
                             style: const TextStyle(
-                              color: _ink,
+                              color: Colors.white,
                               fontSize: 16.0,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            cursorColor: _accent,
-                            cursorWidth: 2.0,
+                              fontWeight: FontWeight.w500,
+                            ), // Make text more visible with increased weight
+                            cursorColor: Colors.white, // Brighter cursor
+                            cursorWidth:
+                                2.0, // Wider cursor for better visibility
                             decoration: InputDecoration(
-                              hintText: 'Search books...',
-                              hintStyle: const TextStyle(color: _muted),
+                              hintText:
+                                  'Search books...', // Changed from 'Search Google or type a URL'
+                              hintStyle: TextStyle(
+                                color: Colors.white60,
+                              ), // Lighter hint text
                               filled: true,
-                              fillColor: Colors.white.withOpacity(0.96),
+                              fillColor: const Color(
+                                0xFF202020,
+                              ).withOpacity(0.7),
                               prefixIcon: _isSearchLoading
-                                  ? const Padding(
-                                      padding: EdgeInsets.all(10),
-                                      child: SizedBox(
-                                        height: 18,
-                                        width: 18,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: _accent,
-                                        ),
+                                  ? Container(
+                                      padding: const EdgeInsets.all(10),
+                                      width: 12,
+                                      height: 12,
+                                      child: const CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white70,
                                       ),
                                     )
                                   : const Icon(
                                       Icons.search,
-                                      color: _muted,
+                                      color: Colors.white70,
                                       size: 22,
                                     ),
                               contentPadding: const EdgeInsets.symmetric(
-                                vertical: 12,
-                                horizontal: 12,
+                                vertical:
+                                    12, // Increased for better text visibility
+                                horizontal:
+                                    12, // Increased for better text visibility
                               ),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(28),
-                                borderSide: const BorderSide(
-                                  color: Colors.transparent,
-                                ),
+                                borderSide: BorderSide.none,
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(28),
-                                borderSide: BorderSide(
-                                  color: Colors.black.withOpacity(0.06),
-                                ),
+                                borderSide: BorderSide.none,
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(28),
-                                borderSide: const BorderSide(
-                                  color: _accent,
-                                  width: 1.2,
+                                borderSide: BorderSide(
+                                  color: Colors.white.withOpacity(0.30),
+                                  width: 1,
                                 ),
                               ),
                             ),
                             onChanged: (value) {
                               _onSearchChanged(value);
+                              // Only show suggestions after minimum length
                               if (value.trim().length > 1) {
+                                // At least 2 characters
                                 _showSuggestionsOverlay();
                               } else {
                                 _hideSuggestionsOverlay();
@@ -994,6 +1038,7 @@ class _HomePageState extends State<HomePage> {
                               _hideSuggestionsOverlay();
                             },
                             onTap: () {
+                              // Show suggestions when search bar is tapped if there's text
                               if (_searchController.text.trim().isNotEmpty) {
                                 _showSuggestionsOverlay();
                               }
@@ -1003,163 +1048,122 @@ class _HomePageState extends State<HomePage> {
                       ),
                       // For you
                       const SizedBox(height: 12),
-                      const _SectionHeader(text: 'For you'),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'For you',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 18),
-                      // Three boxes (pastel)
+                      // Three boxes
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            // Issued Books
                             Expanded(
-                              child: Material(
-                                color: Colors.transparent,
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(16),
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => IssuedBooksPage(
-                                          username: widget.username,
-                                          userBarcode: widget.userBarcode,
+                              child: Container(
+                                height: 90,
+                                decoration: _glassBoxDecoration(),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    // Show real issued books count with a small loader
+                                    if (_isBooksLoading)
+                                      const SizedBox(
+                                        height: 26,
+                                        width: 26,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    else
+                                      Text(
+                                        '${_issuedBooks.length}',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 32,
                                         ),
                                       ),
-                                    );
-                                  },
-                                  child: Container(
-                                    height: 90,
-                                    decoration: _frostBox(),
-                                    child: Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        if (_isBooksLoading)
-                                          const SizedBox(
-                                            height: 26,
-                                            width: 26,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: _accent,
-                                            ),
-                                          )
-                                        else
-                                          Text(
-                                            '${_issuedBooks.length}',
-                                            style: const TextStyle(
-                                              color: _ink,
-                                              fontWeight: FontWeight.w800,
-                                              fontSize: 28,
-                                            ),
-                                          ),
-                                        const SizedBox(height: 4),
-                                        const Text(
-                                          'Issued Books',
-                                          style: TextStyle(
-                                            color: _muted,
-                                            fontSize: 13.5,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ],
+                                    const SizedBox(height: 4),
+                                    const Text(
+                                      'Issued Books',
+                                      style: TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                      ),
                                     ),
-                                  ),
+                                  ],
                                 ),
                               ),
                             ),
-                            // Wishlist
                             Expanded(
-                              child: Material(
-                                color: Colors.transparent,
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(16),
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      WishListPage.route(
-                                        username: widget.username,
-                                        useAltBackground:
-                                            widget.useAltBackground,
-                                        userBarcode: widget.userBarcode,
+                              child: Container(
+                                margin: const EdgeInsets.only(left: 10),
+                                height: 90,
+                                decoration: _glassBoxDecoration(),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: const [
+                                    Text(
+                                      '5',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 32,
                                       ),
-                                    );
-                                  },
-                                  child: Container(
-                                    margin: const EdgeInsets.only(left: 10),
-                                    height: 90,
-                                    decoration: _frostBox(),
-                                    child: const Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        Text(
-                                          '5',
-                                          style: TextStyle(
-                                            color: _ink,
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 28,
-                                          ),
-                                        ),
-                                        SizedBox(height: 4),
-                                        Text(
-                                          'Wishlist',
-                                          style: TextStyle(
-                                            color: _muted,
-                                            fontSize: 13.5,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ],
                                     ),
-                                  ),
+                                    SizedBox(height: 4),
+                                    Text(
+                                      'Wishlist',
+                                      style: TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
-                            // Pay Fine
                             Expanded(
-                              child: Material(
-                                color: Colors.transparent,
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(16),
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => PayFinePage(
-                                          username: widget.username,
-                                        ),
+                              child: Container(
+                                margin: const EdgeInsets.only(left: 10),
+                                height: 90,
+                                decoration: _glassBoxDecoration(),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: const [
+                                    Text(
+                                      '₹12',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 32,
                                       ),
-                                    );
-                                  },
-                                  child: Container(
-                                    margin: const EdgeInsets.only(left: 10),
-                                    height: 90,
-                                    decoration: _frostBox(),
-                                    child: const Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        Text(
-                                          '₹12',
-                                          style: TextStyle(
-                                            color: _ink,
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 28,
-                                          ),
-                                        ),
-                                        SizedBox(height: 4),
-                                        Text(
-                                          'Due Fine',
-                                          style: TextStyle(
-                                            color: _muted,
-                                            fontSize: 13.5,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ],
                                     ),
-                                  ),
+                                    SizedBox(height: 4),
+                                    Text(
+                                      'Due Fine',
+                                      style: TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -1168,12 +1172,26 @@ class _HomePageState extends State<HomePage> {
                       ),
                       // Issued Books section
                       const SizedBox(height: 18),
-                      const _SectionHeader(text: 'Issued Books'),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Issued Books',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 10),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 20),
                         child: Container(
-                          decoration: _frostItem(),
+                          decoration: _glassItemDecoration(), // Transparent box
                           padding: const EdgeInsets.symmetric(
                             vertical: 10,
                             horizontal: 8,
@@ -1187,13 +1205,17 @@ class _HomePageState extends State<HomePage> {
                                 )
                               : Column(
                                   children: _filteredBooks.isEmpty
-                                      ? const [
-                                          Text(
+                                      ? [
+                                          const Text(
                                             'No books found.',
                                             style: TextStyle(
-                                              color: _ink,
+                                              color: Color.fromARGB(
+                                                137,
+                                                255,
+                                                255,
+                                                255,
+                                              ),
                                               fontSize: 16,
-                                              fontWeight: FontWeight.w600,
                                             ),
                                           ),
                                         ]
@@ -1203,57 +1225,76 @@ class _HomePageState extends State<HomePage> {
                                             margin: const EdgeInsets.only(
                                               bottom: 12,
                                             ),
-                                            decoration: _frostRow(),
+                                            decoration: BoxDecoration(
+                                              color: const Color.fromARGB(
+                                                255,
+                                                30,
+                                                30,
+                                                30,
+                                              ).withOpacity(0.8),
+                                              // Darker background
+                                              borderRadius:
+                                                  BorderRadius.circular(14),
+                                              border: Border.all(
+                                                color: Colors.white.withOpacity(
+                                                  0.18,
+                                                ),
+                                                width: 1,
+                                              ),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black
+                                                      .withOpacity(0.2),
+                                                  blurRadius: 6,
+                                                  offset: const Offset(0, 3),
+                                                ),
+                                              ],
+                                            ),
                                             child: ListTile(
                                               leading: ClipRRect(
                                                 borderRadius:
                                                     BorderRadius.circular(8),
                                                 child: Container(
-                                                  decoration: BoxDecoration(
-                                                    gradient:
-                                                        const LinearGradient(
-                                                          colors: [
-                                                            Color(0xFF7C3AED),
-                                                            _accent,
-                                                          ],
-                                                          begin:
-                                                              Alignment.topLeft,
-                                                          end: Alignment
-                                                              .bottomRight,
-                                                        ),
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          8,
-                                                        ),
+                                                  color: const Color(
+                                                    0xFF5B6BFF,
                                                   ),
                                                   width: 50,
                                                   height: 50,
-                                                  child: const Icon(
+                                                  child: Icon(
                                                     Icons.menu_book_rounded,
                                                     color: Colors.white,
-                                                    size: 26,
+                                                    size: 28,
                                                   ),
                                                 ),
                                               ),
                                               title: Text(
                                                 _filteredBooks[i]['title']!,
                                                 style: const TextStyle(
-                                                  color: _ink,
-                                                  fontWeight: FontWeight.w700,
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w600,
                                                   fontSize: 16,
                                                 ),
                                               ),
                                               subtitle: Text(
                                                 _filteredBooks[i]['author']!,
-                                                style: const TextStyle(
-                                                  color: _muted,
+                                                style: TextStyle(
+                                                  color: Colors.white
+                                                      .withOpacity(0.7),
                                                   fontSize: 13,
                                                 ),
                                               ),
-                                              trailing: const Icon(
-                                                Icons.arrow_forward_ios_rounded,
-                                                color: _muted,
-                                                size: 18,
+                                              trailing: Column(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  Icon(
+                                                    Icons
+                                                        .arrow_forward_ios_rounded,
+                                                    color: Colors.white
+                                                        .withOpacity(0.5),
+                                                    size: 18,
+                                                  ),
+                                                ],
                                               ),
                                             ),
                                           ),
@@ -1263,7 +1304,21 @@ class _HomePageState extends State<HomePage> {
                       ),
                       // Recommendations
                       const SizedBox(height: 18),
-                      const _SectionHeader(text: 'Book recommended for you'),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Book recommended for you',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 14),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -1272,7 +1327,7 @@ class _HomePageState extends State<HomePage> {
                             Expanded(
                               child: Container(
                                 height: 200,
-                                decoration: _frostCard(),
+                                decoration: _glassCardDecoration(),
                                 child: _bookIcon(),
                               ),
                             ),
@@ -1280,7 +1335,7 @@ class _HomePageState extends State<HomePage> {
                             Expanded(
                               child: Container(
                                 height: 200,
-                                decoration: _frostCard(),
+                                decoration: _glassCardDecoration(),
                                 child: _bookIcon(),
                               ),
                             ),
@@ -1295,7 +1350,7 @@ class _HomePageState extends State<HomePage> {
                             Expanded(
                               child: Container(
                                 height: 200,
-                                decoration: _frostCard(),
+                                decoration: _glassCardDecoration(),
                                 child: _bookIcon(),
                               ),
                             ),
@@ -1303,7 +1358,7 @@ class _HomePageState extends State<HomePage> {
                             Expanded(
                               child: Container(
                                 height: 200,
-                                decoration: _frostCard(),
+                                decoration: _glassCardDecoration(),
                                 child: _bookIcon(),
                               ),
                             ),
@@ -1323,197 +1378,29 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-// Animated gradient background with soft glow “orbs”
-class _AnimatedBackground extends StatefulWidget {
-  const _AnimatedBackground({Key? key}) : super(key: key);
-
-  @override
-  State<_AnimatedBackground> createState() => _AnimatedBackgroundState();
-}
-
-class _AnimatedBackgroundState extends State<_AnimatedBackground>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c;
-  late final Animation<double> _t;
-
-  @override
-  void initState() {
-    super.initState();
-    _c = AnimationController(vsync: this, duration: const Duration(seconds: 14))
-      ..repeat(reverse: true);
-    _t = CurvedAnimation(parent: _c, curve: Curves.easeInOut);
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _t,
-      builder: (_, __) {
-        // Interpolate colors and alignment to add subtle motion
-        final Color c1 = Color.lerp(_bgA1, _bgB1, _t.value)!;
-        final Color c2 = Color.lerp(_bgA2, _bgB2, _t.value)!;
-        final Alignment aBegin = Alignment.lerp(
-          Alignment.topLeft,
-          Alignment.topRight,
-          _t.value,
-        )!;
-        final Alignment aEnd = Alignment.lerp(
-          Alignment.bottomRight,
-          Alignment.bottomLeft,
-          _t.value,
-        )!;
-
-        return Stack(
-          children: [
-            // Main animated gradient
-            Positioned.fill(
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [c1, c2],
-                    begin: aBegin,
-                    end: aEnd,
-                  ),
-                ),
-              ),
-            ),
-            // Soft glow orbs (radial gradients)
-            // Top-right orb
-            Positioned(
-              right: -60,
-              top: -40,
-              child: _orb(color: Colors.white.withOpacity(0.20), size: 220),
-            ),
-            // Bottom-left orb
-            Positioned(
-              left: -80,
-              bottom: -60,
-              child: _orb(color: Colors.white.withOpacity(0.14), size: 260),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _orb({required Color color, required double size}) {
-    return IgnorePointer(
-      ignoring: true,
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: [color, Colors.transparent],
-            stops: const [0.0, 1.0],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// Section header
-class _SectionHeader extends StatelessWidget {
-  final String text;
-  const _SectionHeader({Key? key, required this.text}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Text(
-          text,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.2,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// Warmer pastel tokens (blend better with warm gradient)
-const _blushHi = Color(0xFFFFF3F7); // warm rose
-const _blushLo = Color(0xFFFFE9F2);
-const _blushBd = Color(0xFFFFD6E4);
-
-const _mintHi = Color(0xFFF1FBF5); // soft mint
-const _mintLo = Color(0xFFE8F7EE);
-const _mintBd = Color(0xFFD1EFDD);
-
-const _pearlHi = Color(0xFFF9F6FF); // neutral pearl
-const _pearlLo = Color(0xFFF3EEFF);
-const _pearlBd = Color(0xFFE3D9FF);
-
-// Stat cards (“For you”) — neutral pearl so numbers pop; light shadow
-BoxDecoration _frostBox() => BoxDecoration(
-  gradient: const LinearGradient(
-    colors: [_pearlHi, _pearlLo],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  ),
+// Reusable decorations
+BoxDecoration _glassBoxDecoration() => BoxDecoration(
+  color: const Color.fromARGB(255, 0, 0, 0).withOpacity(0.35),
   borderRadius: BorderRadius.circular(16),
-  border: Border.all(color: _pearlBd, width: 1),
-  boxShadow: const [
-    BoxShadow(color: Color(0x16000000), blurRadius: 14, offset: Offset(0, 8)),
-  ],
+  border: Border.all(color: Colors.white.withOpacity(0.18), width: 1),
 );
 
-// Issued Books container — blush (warmer)
-BoxDecoration _frostItem() => BoxDecoration(
-  gradient: const LinearGradient(
-    colors: [_blushHi, _blushLo],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  ),
-  borderRadius: BorderRadius.circular(16),
-  border: Border.all(color: _blushBd, width: 1),
-  boxShadow: const [
-    BoxShadow(color: Color(0x14000000), blurRadius: 16, offset: Offset(0, 8)),
-  ],
-);
-
-// Issued Books rows — mint (fresh), very light shadow
-BoxDecoration _frostRow() => BoxDecoration(
-  gradient: const LinearGradient(
-    colors: [_mintHi, _mintLo],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  ),
+BoxDecoration _glassItemDecoration() => BoxDecoration(
+  color: const Color.fromARGB(255, 0, 0, 0).withOpacity(0.35),
   borderRadius: BorderRadius.circular(14),
-  border: Border.all(color: _mintBd, width: 1),
-  boxShadow: const [
-    BoxShadow(color: Color(0x12000000), blurRadius: 10, offset: Offset(0, 5)),
-  ],
+  border: Border.all(color: Colors.white.withOpacity(0.18), width: 1),
 );
 
-// Recommendation cards — pearl to match stats
-BoxDecoration _frostCard() => BoxDecoration(
-  gradient: const LinearGradient(
-    colors: [_pearlHi, _pearlLo],
-    begin: Alignment.topLeft,
-    end: Alignment.bottomRight,
-  ),
+BoxDecoration _glassCardDecoration() => BoxDecoration(
+  color: const Color.fromARGB(255, 0, 0, 0).withOpacity(0.35),
   borderRadius: BorderRadius.circular(16),
-  border: Border.all(color: _pearlBd, width: 1),
-  boxShadow: const [
-    BoxShadow(color: Color(0x14000000), blurRadius: 12, offset: Offset(0, 6)),
-  ],
+  border: Border.all(color: Colors.white.withOpacity(0.18), width: 1),
 );
 
-// Icon color on pastel surfaces
-Widget _bookIcon() =>
-    const Center(child: Icon(Icons.book_outlined, color: _muted, size: 36));
+Widget _bookIcon() => Center(
+  child: Icon(
+    Icons.book_outlined,
+    color: Colors.white.withOpacity(0.7),
+    size: 36,
+  ),
+);
