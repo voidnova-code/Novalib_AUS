@@ -290,6 +290,9 @@ def book_log_list(request):
             data.append({
                 'book_title': getattr(log, 'book_title', ''),
                 'book_author': getattr(log, 'auther', ''),
+                'book_barcode': getattr(log, 'book_barcode', ''),
+                # normalize backend 'avalible' typo to a stable 'available' flag
+                'available': bool(getattr(log, 'avalible', False)),
                 'issued_date': getattr(log, 'issued_date', None),
                 'return_date': getattr(log, 'return_date', None),
                 'username': (f"{getattr(log.user, 'first_name', '')} {getattr(log.user, 'last_name', '')}").strip() if getattr(log, 'user', None) else '',
@@ -357,7 +360,43 @@ def user_wishlist(request):
             'issued_date': getattr(log, 'issued_date', None),
             'return_date': getattr(log, 'return_date', None),
             'book_barcode': getattr(log, 'book_barcode', ''),
+            'available': bool(getattr(log, 'avalible', False)),
             # include wishlist users for debugging if needed
             'wishlist_users': [f"{u.first_name} {u.last_name}".strip() for u in log.wishlist.all()],
         })
+    return JsonResponse(data, safe=False)
+
+@csrf_exempt
+def book_suggestions(request):
+    """
+    GET /book-suggestions/?search=term
+    Returns up to 20 distinct suggestions with minimal fields:
+      - book_title, book_author
+    """
+    if request.method != 'GET':
+      return JsonResponse({'error': 'Invalid request'}, status=400)
+    q = (request.GET.get('search') or '').strip()
+    if not q:
+      return JsonResponse([], safe=False)
+
+    qs = (BooksLog.objects
+          .filter(Q(book_title__icontains=q) |
+                  Q(auther__icontains=q) |
+                  Q(book_barcode__icontains=q))
+          .values('book_title', 'auther')
+          .distinct()[:20])
+
+    # Ensure unique titles in Python as well (extra safety)
+    seen = set()
+    data = []
+    for row in qs:
+        title = (row.get('book_title') or '').strip()
+        if not title or title in seen:
+            continue
+        seen.add(title)
+        data.append({
+            'book_title': title,
+            'book_author': (row.get('auther') or '').strip(),
+        })
+
     return JsonResponse(data, safe=False)

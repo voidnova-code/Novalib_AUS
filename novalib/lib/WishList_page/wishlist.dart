@@ -1,32 +1,32 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../config.dart'; // reuse djangoBaseUrl and theme helpers if present
+import '../config.dart';
 import 'package:flutter/services.dart';
+import '../theme.dart';
 
 class WishListPage extends StatefulWidget {
   final String username;
-  final bool useAltBackground; // NEW
-  final String? userBarcode; // NEW: precise identifier for backend
+  final bool useAltBackground;
+  final String? userBarcode;
 
   const WishListPage({
     Key? key,
     required this.username,
-    required this.useAltBackground, // NEW
-    this.userBarcode, // NEW
+    required this.useAltBackground,
+    this.userBarcode,
   }) : super(key: key);
 
-  // allow navigation via route with arguments Map
   static Route route({
     required String username,
-    required bool useAltBackground, // NEW
-    String? userBarcode, // NEW
+    required bool useAltBackground,
+    String? userBarcode,
   }) {
     return MaterialPageRoute(
       builder: (_) => WishListPage(
         username: username,
-        useAltBackground: useAltBackground, // NEW
-        userBarcode: userBarcode, // NEW
+        useAltBackground: useAltBackground,
+        userBarcode: userBarcode,
       ),
     );
   }
@@ -58,7 +58,6 @@ class _WishListPageState extends State<WishListPage> {
           ? djangoBaseUrl.substring(0, djangoBaseUrl.length - 1)
           : djangoBaseUrl;
 
-      // Helper to perform a GET and parse list results (empty list on any failure)
       Future<List<Map<String, String>>> _try(Uri url) async {
         try {
           final resp = await http.get(url).timeout(const Duration(seconds: 8));
@@ -81,23 +80,18 @@ class _WishListPageState extends State<WishListPage> {
         }
       }
 
-      // Candidate attempts using User-table resolution, then legacy book-log fallback
       final uname = widget.username.trim();
       final barcode = (widget.userBarcode ?? '').trim();
       final unameEnc = Uri.encodeComponent(uname);
       final barcodeEnc = Uri.encodeComponent(barcode);
 
       final attempts = <Uri>[
-        // Resolve via User table first with the most reliable identifier
         if (barcode.isNotEmpty)
           Uri.parse('$baseUrl/user-wishlist/?barcode=$barcodeEnc'),
-        // Then try other identifiers
         Uri.parse('$baseUrl/user-wishlist/?username=$unameEnc'),
         Uri.parse('$baseUrl/user-wishlist/?email=$unameEnc'),
         if (int.tryParse(uname) != null)
           Uri.parse('$baseUrl/user-wishlist/?user_id=$uname'),
-
-        // Fallback to existing book-log wishlist filter (if backend supports it)
         if (barcode.isNotEmpty)
           Uri.parse('$baseUrl/book-log/?barcode=$barcodeEnc&wishlist=1'),
         Uri.parse('$baseUrl/book-log/?username=$unameEnc&wishlist=1'),
@@ -114,30 +108,15 @@ class _WishListPageState extends State<WishListPage> {
 
       setState(() {
         _books = found;
-        if (_books.isEmpty) {
-          _error = null; // No items but not a hard error
-        }
+        if (_books.isEmpty) _error = null;
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = 'Network error';
-      });
+      setState(() => _error = 'Network error');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
-
-  // Reuse lightweight glass decoration
-  BoxDecoration _glassBoxDecoration() => BoxDecoration(
-    color: const Color.fromARGB(255, 0, 0, 0).withValues(alpha: 0.35),
-    borderRadius: BorderRadius.circular(14),
-    border: Border.all(color: Colors.white.withValues(alpha: 0.18), width: 1),
-  );
 
   @override
   Widget build(BuildContext context) {
@@ -145,9 +124,8 @@ class _WishListPageState extends State<WishListPage> {
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         title: const Text('Wishlist'),
-        backgroundColor: const Color.fromARGB(104, 0, 0, 0),
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        shadowColor: const Color.fromARGB(0, 0, 0, 0),
         surfaceTintColor: Colors.transparent,
         systemOverlayStyle: SystemUiOverlayStyle.light,
         foregroundColor: Colors.white,
@@ -162,32 +140,7 @@ class _WishListPageState extends State<WishListPage> {
       backgroundColor: Colors.transparent,
       body: Stack(
         children: [
-          // background image to match login/home
-          Positioned.fill(
-            child: Image.asset(
-              widget.useAltBackground
-                  ? 'assets/background2.jpg'
-                  : 'assets/background1.jpg',
-              fit: BoxFit.cover,
-            ),
-          ),
-          // gradient overlay
-          Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    Colors.black.withValues(alpha: 0.15),
-                    Colors.black.withValues(alpha: 0.35),
-                    Colors.black.withValues(alpha: 0.60),
-                  ],
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                ),
-              ),
-            ),
-          ),
-          // existing content on top of background
+          const Positioned.fill(child: AnimatedBg()),
           SafeArea(
             child: _isLoading && _books.isEmpty
                 ? const Center(child: CircularProgressIndicator())
@@ -225,7 +178,7 @@ class _WishListPageState extends State<WishListPage> {
                     itemBuilder: (context, i) {
                       final book = _books[i];
                       return Container(
-                        decoration: _glassBoxDecoration(),
+                        decoration: AppDecorations.rowMint(),
                         padding: const EdgeInsets.symmetric(
                           vertical: 12,
                           horizontal: 12,
@@ -233,14 +186,22 @@ class _WishListPageState extends State<WishListPage> {
                         child: Row(
                           children: [
                             ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(10),
                               child: Container(
-                                color: const Color(0xFF5B6BFF),
                                 width: 56,
                                 height: 72,
-                                child:
-                                    book['cover'] != null &&
-                                        book['cover']!.isNotEmpty
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    colors: [
+                                      Color(0xFF7C3AED),
+                                      AppColors.accent,
+                                    ],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  ),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: (book['cover'] ?? '').isNotEmpty
                                     ? Image.network(
                                         book['cover']!,
                                         fit: BoxFit.cover,
@@ -253,7 +214,7 @@ class _WishListPageState extends State<WishListPage> {
                                     : const Icon(
                                         Icons.menu_book_rounded,
                                         color: Colors.white,
-                                        size: 32,
+                                        size: 28,
                                       ),
                               ),
                             ),
@@ -265,7 +226,7 @@ class _WishListPageState extends State<WishListPage> {
                                   Text(
                                     book['title'] ?? '',
                                     style: const TextStyle(
-                                      color: Colors.white,
+                                      color: AppColors.ink,
                                       fontWeight: FontWeight.w700,
                                       fontSize: 16,
                                     ),
@@ -275,75 +236,20 @@ class _WishListPageState extends State<WishListPage> {
                                   const SizedBox(height: 6),
                                   Text(
                                     book['author'] ?? '',
-                                    style: TextStyle(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.75,
-                                      ),
+                                    style: const TextStyle(
+                                      color: AppColors.muted,
                                       fontSize: 13,
                                     ),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
-                                  const SizedBox(height: 8),
-                                  Row(
-                                    children: [
-                                      if ((book['issued_date'] ?? '')
-                                          .isNotEmpty)
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 4,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: Colors.white10,
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            'Issued: ${book['issued_date']}',
-                                            style: TextStyle(
-                                              color: Colors.white70,
-                                              fontSize: 11,
-                                            ),
-                                          ),
-                                        ),
-                                      const SizedBox(width: 8),
-                                      if ((book['return_date'] ?? '')
-                                          .isNotEmpty)
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 4,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: Colors.white10,
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            'Return: ${book['return_date']}',
-                                            style: TextStyle(
-                                              color: Colors.white70,
-                                              fontSize: 11,
-                                            ),
-                                          ),
-                                        ),
-                                    ],
-                                  ),
                                 ],
                               ),
                             ),
-                            IconButton(
-                              icon: const Icon(
-                                Icons.arrow_forward_ios,
-                                color: Colors.white70,
-                                size: 18,
-                              ),
-                              onPressed: () {
-                                // placeholder: can navigate to book detail later
-                              },
+                            const Icon(
+                              Icons.arrow_forward_ios_rounded,
+                              color: AppColors.muted,
+                              size: 18,
                             ),
                           ],
                         ),
