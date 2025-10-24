@@ -224,7 +224,7 @@ class _NotificationPageState extends State<NotificationPage> {
                       ),
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.06),
+                        color: const Color.fromARGB(255, 0, 0, 0).withOpacity(0.06),
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: isLoading
@@ -268,7 +268,7 @@ class _NotificationPageState extends State<NotificationPage> {
                       ),
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.06),
+                        color: const Color.fromARGB(255, 0, 0, 0).withOpacity(0.06),
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: isLibraryLoading

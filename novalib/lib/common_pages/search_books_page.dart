@@ -491,7 +491,7 @@ class _AvailabilityChip extends StatelessWidget {
           Icon(icon, color: fg, size: 16),
           const SizedBox(width: 6),
           Text(
-            available ? 'Available' : 'Issued',
+            available ? 'Available' : 'Unavailable',
             style: TextStyle(color: fg, fontWeight: FontWeight.w700),
           ),
         ],

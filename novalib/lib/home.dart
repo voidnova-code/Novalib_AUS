@@ -44,6 +44,9 @@ class _HomePageState extends State<HomePage> {
   // Keep search results separate so "Issued Books" never changes due to search
   List<Map<String, String>> _searchResults = [];
   bool _isBooksLoading = false;
+  // Wishlist state
+  int _wishlistCount = 0;
+  bool _isWishlistLoading = false;
   List<String> _searchSuggestions = [];
   bool _showSuggestions = false;
   String _searchQuery = '';
@@ -186,6 +189,7 @@ class _HomePageState extends State<HomePage> {
         _hideSuggestionsOverlay();
       }
     });
+    _fetchWishlistCount(); // Add this line to fetch wishlist count on init
   }
 
   @override
@@ -586,10 +590,108 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // Fetch wishlist count (tries user-wishlist and book-log?wishlist=1 endpoints)
+  Future<void> _fetchWishlistCount() async {
+    if (!mounted) return;
+    setState(() => _isWishlistLoading = true);
+
+    try {
+      String base = djangoBaseUrl.trim();
+      if (base.endsWith('/')) base = base.substring(0, base.length - 1);
+
+      final unameRaw = widget.username.trim();
+      final uname = Uri.encodeComponent(unameRaw);
+      final barcodeRaw = (widget.userBarcode ?? '').trim();
+      final barcode = Uri.encodeComponent(barcodeRaw);
+      final userIdRaw = int.tryParse(unameRaw) != null ? unameRaw : '';
+
+      // Build endpoints to try: both root and /api prefix
+      List<String> roots = [base, '$base/api'];
+      List<Uri> attempts = [];
+
+      for (final root in roots) {
+        if (barcodeRaw.isNotEmpty) {
+          attempts.add(Uri.parse('$root/user-wishlist/?barcode=$barcode'));
+          attempts.add(Uri.parse('$root/book-log/?barcode=$barcode&wishlist=1'));
+        }
+        attempts.add(Uri.parse('$root/user-wishlist/?username=$uname'));
+        attempts.add(Uri.parse('$root/user-wishlist/?email=$uname'));
+        if (userIdRaw.isNotEmpty) {
+          attempts.add(Uri.parse('$root/user-wishlist/?user_id=$userIdRaw'));
+        }
+        attempts.add(Uri.parse('$root/book-log/?username=$uname&wishlist=1'));
+        attempts.add(Uri.parse('$root/book-log/?email=$uname&wishlist=1'));
+      }
+
+      int dedupCountFromList(List list) {
+        // Prefer unique barcodes; fallback to title+author composite
+        final seenBarcodes = <String>{};
+        final seenComposite = <String>{};
+        for (final e in list) {
+          if (e is Map) {
+            final m = e as Map;
+            final bc = (m['book_barcode'] ?? m['barcode'] ?? '').toString().trim();
+            if (bc.isNotEmpty) {
+              seenBarcodes.add(bc);
+              continue;
+            }
+            final title = (m['book_title'] ?? m['title'] ?? '').toString().trim();
+            final author = (m['book_author'] ?? m['auther'] ?? m['author'] ?? '').toString().trim();
+            final key = '${title.toLowerCase()}|${author.toLowerCase()}';
+            if (title.isNotEmpty) seenComposite.add(key);
+          }
+        }
+        return seenBarcodes.isNotEmpty ? seenBarcodes.length : seenComposite.length;
+      }
+
+      int extractCount(dynamic body) {
+        if (body is List) return dedupCountFromList(body);
+        if (body is Map) {
+          // common containers
+          for (final k in ['results', 'data', 'items', 'wishlist']) {
+            final v = body[k];
+            if (v is List) return dedupCountFromList(v);
+          }
+        }
+        return 0;
+      }
+
+      int foundCount = 0;
+      for (final url in attempts) {
+        try {
+          debugPrint('Wishlist count attempt: $url');
+          final resp = await http.get(url, headers: const {'Accept': 'application/json'}).timeout(const Duration(seconds: 8));
+          if (resp.statusCode != 200) continue;
+          final txt = resp.bodyBytes.isNotEmpty ? utf8.decode(resp.bodyBytes) : resp.body;
+          final decoded = json.decode(txt);
+          final c = extractCount(decoded);
+          if (c > 0) {
+            foundCount = c;
+            break;
+          }
+          // If zero but response is valid, keep trying other endpoints
+        } catch (e) {
+          debugPrint('Wishlist count error for $url: $e');
+          // keep trying
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _wishlistCount = foundCount;
+      });
+    } catch (e) {
+      debugPrint('Wishlist unexpected error: $e');
+    } finally {
+      if (mounted) setState(() => _isWishlistLoading = false);
+    }
+  }
+
   // Add: unified refresh method for Home
   Future<void> _refreshHome() async {
     _hideSuggestionsOverlay();
     await _fetchIssuedBooks();
+    await _fetchWishlistCount(); // Refresh wishlist count
   }
 
   List<Map<String, String>> get _filteredBooks => _issuedBooks;
@@ -703,7 +805,10 @@ class _HomePageState extends State<HomePage> {
                             useAltBackground: widget.useAltBackground,
                             userBarcode: widget.userBarcode,
                           ),
-                        );
+                        ).then((_) {
+                          // refresh count after returning
+                          if (mounted) _fetchWishlistCount();
+                        });
                       },
                     ),
                     ListTile(
@@ -1097,26 +1202,39 @@ class _HomePageState extends State<HomePage> {
                                             widget.useAltBackground,
                                         userBarcode: widget.userBarcode,
                                       ),
-                                    );
+                                    ).then((_) {
+                                      // refresh count after returning
+                                      if (mounted) _fetchWishlistCount();
+                                    });
                                   },
                                   child: Container(
                                     margin: const EdgeInsets.only(left: 10),
                                     height: 90,
                                     decoration: _frostBox(),
-                                    child: const Column(
+                                    child: Column(
                                       mainAxisAlignment:
                                           MainAxisAlignment.center,
                                       children: [
-                                        Text(
-                                          '5',
-                                          style: TextStyle(
-                                            color: _ink,
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 28,
+                                        if (_isWishlistLoading)
+                                          const SizedBox(
+                                            height: 26,
+                                            width: 26,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: _accent,
+                                            ),
+                                          )
+                                        else
+                                          Text(
+                                            '$_wishlistCount',
+                                            style: const TextStyle(
+                                              color: _ink,
+                                              fontWeight: FontWeight.w800,
+                                              fontSize: 28,
+                                            ),
                                           ),
-                                        ),
-                                        SizedBox(height: 4),
-                                        Text(
+                                        const SizedBox(height: 4),
+                                        const Text(
                                           'Wishlist',
                                           style: TextStyle(
                                             color: _muted,

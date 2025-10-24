@@ -306,7 +306,7 @@ class _AvailabilityChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Color bg = available ? Colors.green : Colors.red;
-    final String text = available ? 'Available' : 'Issued';
+    final String text = available ? 'Available' : 'Unavailable';
     final IconData icon = available ? Icons.check_circle : Icons.cancel;
 
     return Chip(
