@@ -4,7 +4,7 @@ from django.utils.html import format_html
 from django.shortcuts import redirect, render
 from django.db import models  # <-- Add this import
 from django import forms  # <-- Add this import
-from .models import User, BooksLog, Login, ReturnDesk, Department, Notification, DeveloperNotification  # Add DeveloperNotification
+from .models import User, BooksLog, Login, ReturnDesk, Department, Notification, DeveloperNotification, BooksDetail  # Added BooksDetail
 
 # Register your models here.
 
@@ -101,11 +101,11 @@ class UserAdmin(admin.ModelAdmin):
 
 @admin.register(BooksLog)
 class BooksLogAdmin(admin.ModelAdmin):
-    list_display = ('book_barcode', 'user', 'get_wishlist_users', 'book_title', 'auther', 'avalible', 'issued_date', 'return_date')  # Updated 'get_wishlist_users'
-    search_fields = ('user__barcode_number', 'wishlist__barcode_number', 'book_title', 'auther')
+    list_display = ('book_title', 'available_book_count', 'get_wishlist_users', 'auther', 'avalible')
+    search_fields = ('wishlist__barcode_number', 'book_title', 'auther')  # Removed user__barcode_number
     fieldsets = (
         (None, {
-            'fields': ('book_barcode', 'user', 'wishlist', 'book_title', 'auther', 'avalible', 'issued_date', 'return_date')  # Added 'wishlist'
+            'fields': ('wishlist', 'book_title', 'auther', 'avalible')
         }),
     )
 
@@ -134,6 +134,17 @@ class BooksLogAdmin(admin.ModelAdmin):
         )
         return render(request, "admin/unavailable_books.html", context)
     view_unavailable_books.short_description = "Show Unavailable Books (separate page)"
+
+    def available_book_count(self, obj):
+        # Count available copies for the same title+author from BooksDetail
+        return BooksDetail.objects.filter(book_title=obj.book_title, auther=obj.auther, avalible=True).count()
+    available_book_count.short_description = 'Available Book Count'
+
+    def avalible(self, obj):
+        # Show True unless the available count for this title is 0
+        return self.available_book_count(obj) > 0
+    avalible.short_description = 'Available'
+    avalible.boolean = True
 
 @admin.register(Login)
 class LoginAdmin(admin.ModelAdmin):
@@ -285,3 +296,68 @@ class DeveloperNotificationAdmin(admin.ModelAdmin):
         if obj.uploaded_image and obj.uploaded_image.storage.exists(obj.uploaded_image.name):
             obj.uploaded_image.delete(save=False)
         super().delete_model(request, obj)
+
+@admin.register(BooksDetail)
+class BooksDetailAdmin(admin.ModelAdmin):
+    list_display = ('book_barcode', 'get_title_author', 'user', 'avalible', 'get_issued_date', 'get_return_date')  # added user
+    search_fields = ('book_barcode', 'book_title', 'auther')
+
+    def get_title_author(self, obj):
+        return f"{obj.book_title} ({obj.auther})"
+    get_title_author.short_description = 'Title and Author'
+
+    def get_issued_date(self, obj):
+        return getattr(obj, 'issued_date', None)
+    get_issued_date.short_description = 'Issued Date'
+
+    def get_return_date(self, obj):
+        return getattr(obj, 'return_date', None)
+    get_return_date.short_description = 'Return Date'
+
+    # use default queryset (BooksDetail.objects.all()) so admin shows actual BooksDetail rows
+
+    class BooksDetailForm(forms.ModelForm):
+        book_title_author = forms.ChoiceField(choices=[], required=True, label="Book title and Author")
+
+        class Meta:
+            model = BooksDetail
+            fields = '__all__'
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            # Build unique (title, author) pairs from BooksLog
+            pairs = BooksLog.objects.values_list('book_title', 'auther').distinct()
+            self.fields['book_title_author'].choices = [
+                (f"{title}|||{author}", f"{title} ({author})") for title, author in pairs
+            ]
+            # Set initial values if editing
+            if self.instance and self.instance.pk:
+                self.fields['book_title_author'].initial = f"{self.instance.book_title}|||{self.instance.auther}"
+
+        def clean(self):
+            cleaned_data = super().clean()
+            value = cleaned_data.get('book_title_author')
+            if value:
+                title, author = value.split('|||', 1)
+                # set on instance so save works even when fields are removed from form
+                self.instance.book_title = title
+                self.instance.auther = author
+            return cleaned_data
+
+        def save(self, commit=True):
+            # ensure instance has book_title/auther from dropdown before saving
+            value = self.cleaned_data.get('book_title_author')
+            if value:
+                title, author = value.split('|||', 1)
+                self.instance.book_title = title
+                self.instance.auther = author
+            return super().save(commit=commit)
+
+    form = BooksDetailForm
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        # Remove book_title and auther fields from the form (handled by dropdown)
+        form.base_fields.pop('book_title', None)
+        form.base_fields.pop('auther', None)
+        return form

@@ -24,27 +24,18 @@ class User(models.Model):
 
 class BooksLog(models.Model):
     book_barcode = models.CharField(max_length=100)
-    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     wishlist = models.ManyToManyField(User, related_name='wishlist_books', blank=True)  # Changed to ManyToManyField
     book_title = models.CharField(max_length=255)
     auther = models.CharField(max_length=255)
     avalible = models.BooleanField(default=True)
-    issued_date = models.DateField(null=True, blank=True)
-    return_date = models.DateField(null=True, blank=True)
-
     class Meta:
         db_table = 'books_log'
 
     def __str__(self):
-        user_display = str(self.user) if self.user else "No User"
-        return f"{self.book_title} ({self.book_barcode}) - {user_display}"
+        return f"{self.book_title} ({self.book_barcode})"
 
     def save(self, *args, **kwargs):
-        # If user is null, mark as available; else, mark as unavailable
-        if self.user is None:
-            self.avalible = True
-        else:
-            self.avalible = False
+        # Removed logic for avalible based on user
         super().save(*args, **kwargs)
 
 class Login(models.Model):
@@ -160,3 +151,15 @@ class DeveloperNotification(models.Model):
 def delete_developer_notification_image(sender, instance, **kwargs):
     if instance.uploaded_image and instance.uploaded_image.storage.exists(instance.uploaded_image.name):
         instance.uploaded_image.delete(save=False)
+
+class BooksDetail(models.Model):
+    book_barcode = models.CharField(max_length=100, unique=True)
+    book_title = models.CharField(max_length=255)
+    auther = models.CharField(max_length=255)
+    avalible = models.BooleanField(default=True)
+    issued_date = models.DateField(null=True, blank=True)
+    return_date = models.DateField(null=True, blank=True)
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='book_details')  # added user FK
+
+    def __str__(self):
+        return f"{self.book_title} ({self.book_barcode})"
