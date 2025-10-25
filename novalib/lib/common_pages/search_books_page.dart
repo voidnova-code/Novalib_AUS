@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'book_details_page.dart'; // added
 
 import '../config.dart';
 import '../models/book_item.dart';
@@ -129,6 +130,65 @@ class _SearchBooksPageState extends State<SearchBooksPage> {
     });
   }
 
+  // Keep one available copy when duplicates exist; if all are unavailable, keep all copies.
+  void _dedupeInPlaceByTitlePreferAvailable(
+    List<BookItem> items,
+    List<bool> avs,
+  ) {
+    if (items.isEmpty || items.length != avs.length) return;
+
+    String _normTitle(String t) =>
+        (t.isEmpty ? '(untitled)' : t).trim().toLowerCase();
+
+    // Build groups of indices by normalized title
+    final groups = <String, List<int>>{};
+    for (var i = 0; i < items.length; i++) {
+      final key = _normTitle(items[i].title);
+      (groups[key] ??= <int>[]).add(i);
+    }
+
+    final keep = List<bool>.filled(items.length, false);
+
+    for (final entry in groups.entries) {
+      final idxs = entry.value;
+      final anyAvail = idxs.any((i) => avs[i] || items[i].available);
+
+      if (anyAvail) {
+        // Keep exactly one available copy (first available encountered)
+        int chosen = idxs.first;
+        for (final i in idxs) {
+          if (avs[i] || items[i].available) {
+            chosen = i;
+            break;
+          }
+        }
+        keep[chosen] = true;
+      } else {
+        // If none are available, keep all copies for this title
+        for (final i in idxs) {
+          keep[i] = true;
+        }
+      }
+    }
+
+    // Rebuild lists preserving original order
+    final filteredItems = <BookItem>[];
+    final filteredAvs = <bool>[];
+    for (var i = 0; i < items.length; i++) {
+      if (keep[i]) {
+        filteredItems.add(items[i]);
+        filteredAvs.add(avs[i]);
+      }
+    }
+
+    items
+      ..clear()
+      ..addAll(filteredItems);
+    avs
+      ..clear()
+      ..addAll(filteredAvs);
+  }
+
   Future<void> _search(String q) async {
     setState(() => _loading = true);
     try {
@@ -196,6 +256,10 @@ class _SearchBooksPageState extends State<SearchBooksPage> {
           debugPrint('Search error for $u: $e');
         }
       }
+
+      // Apply dedupe: for duplicate titles, keep only one, preferring available
+      _dedupeInPlaceByTitlePreferAvailable(items, avs);
+
       if (!mounted) return;
       setState(() {
         _results = items;
@@ -351,9 +415,15 @@ class _SearchBooksPageState extends State<SearchBooksPage> {
                                   Navigator.of(
                                     context,
                                     rootNavigator: true,
-                                  ).pushNamed(
-                                    '/book_details',
-                                    arguments: b, // BookItem
+                                  ).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => BookDetailsPage(
+                                        book: b,
+                                        username: widget.username, // added
+                                        userBarcode:
+                                            widget.userBarcode, // added
+                                      ),
+                                    ),
                                   );
                                 },
                                 child: Container(

@@ -400,3 +400,118 @@ def book_suggestions(request):
         })
 
     return JsonResponse(data, safe=False)
+
+@csrf_exempt
+def wishlist(request):
+    """
+    Wishlist endpoint:
+      - POST: add a book to a user's wishlist
+      - DELETE: remove a book from a user's wishlist
+      - GET: proxy to user_wishlist (use same query params)
+    Expected user identifiers (any one):
+      - user_barcode / barcode_number / email / user_id / username
+    Expected book identifiers (prefer in this order):
+      - book_barcode, or (title + author)
+      - optionally 'isbn' will be tried against book_barcode too
+    """
+    if request.method == 'GET':
+        # Reuse existing listing behavior
+        return user_wishlist(request)
+
+    if request.method not in ('POST', 'DELETE'):
+        return JsonResponse({'error': 'Invalid request'}, status=400)
+
+    try:
+        data = json.loads(request.body.decode('utf-8') or '{}')
+    except Exception:
+        data = {}
+
+    # Resolve user
+    def _resolve_user():
+        username = (data.get('username') or '').strip()
+        email = (data.get('email') or '').strip()
+        user_id = (str(data.get('user_id') or '')).strip()
+        # Prefer explicit user_barcode to avoid clashing with book_barcode
+        user_barcode = (data.get('user_barcode') or data.get('barcode_number') or '').strip()
+        # As a last resort, if client only sent 'barcode' and no book_barcode, treat it as user barcode
+        if not user_barcode and not data.get('book_barcode'):
+            user_barcode = (data.get('barcode') or '').strip()
+
+        q = Q()
+        if user_barcode:
+            q |= Q(barcode_number__iexact=user_barcode)
+        if user_id.isdigit():
+            q |= Q(id=int(user_id))
+        if email:
+            q |= Q(email__iexact=email)
+        if username:
+            parts = [p for p in username.split() if p]
+            if len(parts) >= 2:
+                q |= (Q(first_name__iexact=parts[0]) & Q(last_name__iexact=parts[-1]))
+            q |= Q(first_name__icontains=username) | Q(last_name__icontains=username)
+            # also try if someone passed barcode/email via username param
+            q |= Q(barcode_number__iexact=username) | Q(email__iexact=username)
+
+        return User.objects.filter(q).first()
+
+    user = _resolve_user()
+    if not user:
+        return JsonResponse({'error': 'User not found for wishlist operation'}, status=404)
+
+    # Resolve book
+    book_barcode = (data.get('book_barcode') or '').strip()
+    isbn = (data.get('isbn') or '').strip()
+    title = (data.get('title') or data.get('book_title') or '').strip()
+    author = (data.get('author') or data.get('book_author') or data.get('auther') or '').strip()
+
+    books_qs = BooksLog.objects.all()
+
+    if book_barcode:
+        books_qs = books_qs.filter(book_barcode__iexact=book_barcode)
+    elif isbn:
+        # Try matching ISBN against barcode if your DB stores it there
+        books_qs = books_qs.filter(Q(book_barcode__iexact=isbn) | Q(book_title__iexact=title) | Q(auther__iexact=author))
+    elif title:
+        qs = Q(book_title__iexact=title)
+        if author:
+            qs &= Q(auther__iexact=author)
+        books_qs = books_qs.filter(qs)
+    else:
+        return JsonResponse({'error': 'Insufficient book identifiers'}, status=400)
+
+    if not books_qs.exists():
+        # Relax matching if strict match failed
+        relaxed = BooksLog.objects.all()
+        if book_barcode:
+            relaxed = relaxed.filter(book_barcode__icontains=book_barcode)
+        elif title:
+            q = Q(book_title__icontains=title)
+            if author:
+                q &= Q(auther__icontains=author)
+            relaxed = relaxed.filter(q)
+        if not relaxed.exists():
+            return JsonResponse({'error': 'Book not found for wishlist'}, status=404)
+        books_qs = relaxed
+
+    # Prefer an available copy if multiple entries
+    book = books_qs.filter(avalible=True).first() or books_qs.first()
+
+    if request.method == 'POST':
+        book.wishlist.add(user)
+        return JsonResponse({
+            'message': 'Added to wishlist',
+            'book_title': getattr(book, 'book_title', ''),
+            'book_author': getattr(book, 'auther', ''),
+            'book_barcode': getattr(book, 'book_barcode', ''),
+            'user': {'id': user.id, 'name': f'{user.first_name} {user.last_name}'.strip()},
+        }, status=200)
+
+    # DELETE
+    book.wishlist.remove(user)
+    return JsonResponse({
+        'message': 'Removed from wishlist',
+        'book_title': getattr(book, 'book_title', ''),
+        'book_author': getattr(book, 'auther', ''),
+        'book_barcode': getattr(book, 'book_barcode', ''),
+        'user': {'id': user.id, 'name': f'{user.first_name} {user.last_name}'.strip()},
+    }, status=200)
