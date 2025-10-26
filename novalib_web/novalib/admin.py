@@ -29,7 +29,7 @@ class UserAdmin(admin.ModelAdmin):
     wishlist_link.short_description = 'Wishlist'
 
     def bookhold_link(self, obj):
-        url = reverse('admin:novalib_bookslog_changelist') + f'?user__id__exact={obj.pk}&avalible=0'
+        url = reverse('admin:novalib_booksdetail_changelist') + f'?user__id__exact={obj.pk}&avalible=0'
         return format_html('<a href="{}">Book Hold</a>', url)
     bookhold_link.short_description = 'Book Hold'
 
@@ -60,8 +60,8 @@ class UserAdmin(admin.ModelAdmin):
     def view_bookhold_action(self, request, queryset):
         if queryset.count() == 1:
             obj = queryset.first()
-            # Show only books held by the selected user (avalible=False)
-            bookholds = BooksLog.objects.filter(user=obj, avalible=False)
+            # Show only books held by the selected user (avalible=False) from BooksDetail
+            bookholds = BooksDetail.objects.filter(user=obj, avalible=False)
             context = dict(
                 self.admin_site.each_context(request),
                 user=obj,
@@ -73,10 +73,9 @@ class UserAdmin(admin.ModelAdmin):
     view_bookhold_action.short_description = "View Book Hold"
 
     def issued_book_list(self, obj):
-        # List of books currently issued to the user (avalible=False)
-        return ", ".join(
-            BooksLog.objects.filter(user=obj, avalible=False).values_list('book_title', flat=True)
-        ) or "-"
+        # List of books currently issued to the user from BooksDetail (any assigned book)
+        titles = BooksDetail.objects.filter(user=obj).values_list('book_title', flat=True).distinct()
+        return ", ".join(titles) if titles else "-"
     issued_book_list.short_description = "Issued Book List"
 
     def wish_list(self, obj):
@@ -101,7 +100,7 @@ class UserAdmin(admin.ModelAdmin):
 
 @admin.register(BooksLog)
 class BooksLogAdmin(admin.ModelAdmin):
-    list_display = ('book_title', 'available_book_count', 'get_wishlist_users', 'auther', 'avalible')
+    list_display = ('book_title', 'available_count', 'book_count', 'get_wishlist_users', 'auther', 'availability')  # added 'book_count' after 'available_count'
     search_fields = ('wishlist__barcode_number', 'book_title', 'auther')  # Removed user__barcode_number
     fieldsets = (
         (None, {
@@ -135,16 +134,21 @@ class BooksLogAdmin(admin.ModelAdmin):
         return render(request, "admin/unavailable_books.html", context)
     view_unavailable_books.short_description = "Show Unavailable Books (separate page)"
 
-    def available_book_count(self, obj):
-        # Count available copies for the same title+author from BooksDetail
-        return BooksDetail.objects.filter(book_title=obj.book_title, auther=obj.auther, avalible=True).count()
-    available_book_count.short_description = 'Available Book Count'
+    def available_count(self, obj):
+        # Count BooksDetail entries for same title+author that have no user and are marked available
+        return BooksDetail.objects.filter(book_title=obj.book_title, auther=obj.auther, user__isnull=True, avalible=True).count()
+    available_count.short_description = 'Available Count'
 
-    def avalible(self, obj):
-        # Show True unless the available count for this title is 0
-        return self.available_book_count(obj) > 0
-    avalible.short_description = 'Available'
-    avalible.boolean = True
+    def book_count(self, obj):
+        # Total copies for the same title+author (regardless of user/availability)
+        return BooksDetail.objects.filter(book_title=obj.book_title, auther=obj.auther).count()
+    book_count.short_description = 'Book Count'
+
+    def availability(self, obj):
+        # True when at least one unassigned available copy exists, False when none
+        return self.available_count(obj) > 0
+    availability.short_description = 'Availability'
+    availability.boolean = True
 
 @admin.register(Login)
 class LoginAdmin(admin.ModelAdmin):
@@ -164,8 +168,8 @@ class LoginAdmin(admin.ModelAdmin):
 
     def bookhold_view(self, request, user_id):
         user = User.objects.get(pk=user_id)
-        # Show all BooksLog for this user where avalible=False (book hold)
-        bookholds = BooksLog.objects.filter(user=user, avalible=False)
+        # Show all BooksDetail for this user where avalible=False (book hold)
+        bookholds = BooksDetail.objects.filter(user=user, avalible=False)
         context = dict(
             self.admin_site.each_context(request),
             user=user,
@@ -189,7 +193,7 @@ class ReturnDeskAdmin(admin.ModelAdmin):
         autocomplete_fields = ['book']
     else:
         class ReturnDeskForm(forms.ModelForm):
-            # Replace raw input with a dropdown fed from BooksLog
+            # Replace raw input with a dropdown fed from BooksDetail
             book = forms.ChoiceField(required=True, choices=[])
 
             class Meta:
@@ -200,7 +204,7 @@ class ReturnDeskAdmin(admin.ModelAdmin):
                 super().__init__(*args, **kwargs)
                 # Try to scope options to the selected student, else show all
                 student_id = self.initial.get('student') or getattr(self.instance, 'student_id', None)
-                qs = BooksLog.objects.all()
+                qs = BooksDetail.objects.all()
                 if student_id:
                     qs = qs.filter(user_id=student_id, avalible=False)
                 # Build choices (value=title, label=title + barcode)
@@ -221,7 +225,7 @@ class ReturnDeskAdmin(admin.ModelAdmin):
     # When book is FK, filter its queryset to the selected student (if provided)
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if self._is_book_fk and db_field.name == 'book':
-            qs = BooksLog.objects.all()
+            qs = BooksDetail.objects.all()
             # Try to grab student id from GET (add form) or POST (change form)
             student_id = request.GET.get('student') or request.POST.get('student')
             if student_id:
@@ -299,7 +303,7 @@ class DeveloperNotificationAdmin(admin.ModelAdmin):
 
 @admin.register(BooksDetail)
 class BooksDetailAdmin(admin.ModelAdmin):
-    list_display = ('book_barcode', 'get_title_author', 'user', 'avalible', 'get_issued_date', 'get_return_date')  # added user
+    list_display = ('book_barcode', 'get_title_author', 'user', 'is_available', 'get_issued_date', 'get_return_date')  # use admin method for availability
     search_fields = ('book_barcode', 'book_title', 'auther')
 
     def get_title_author(self, obj):
@@ -313,6 +317,14 @@ class BooksDetailAdmin(admin.ModelAdmin):
     def get_return_date(self, obj):
         return getattr(obj, 'return_date', None)
     get_return_date.short_description = 'Return Date'
+
+    def is_available(self, obj):
+        # If assigned to a user -> unavailable. Otherwise fall back to stored avalible flag.
+        if getattr(obj, 'user', None):
+            return False
+        return bool(obj.avalible)
+    is_available.short_description = 'Available'
+    is_available.boolean = True
 
     # use default queryset (BooksDetail.objects.all()) so admin shows actual BooksDetail rows
 
