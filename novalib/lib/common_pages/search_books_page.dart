@@ -25,18 +25,24 @@ class SearchBooksPage extends StatefulWidget {
 }
 
 class _SearchBooksPageState extends State<SearchBooksPage> {
+  bool _loading = false;
+  List<BookItem> _results = [];
+  List<bool> _availabilities = [];
+  List<int> _availableCounts = []; // added
+
   final TextEditingController _controller = TextEditingController();
   Timer? _debounce;
-  bool _loading = false;
   String _query = '';
-  List<BookItem> _results = [];
-  // Computed availability aligned with _results
-  List<bool> _availabilities = [];
-  bool _modeAll = false; // when true, show all books (available + unavailable)
 
   String get _base => djangoBaseUrl.endsWith('/')
       ? djangoBaseUrl.substring(0, djangoBaseUrl.length - 1)
       : djangoBaseUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAllBooks();
+  }
 
   @override
   void dispose() {
@@ -45,7 +51,7 @@ class _SearchBooksPageState extends State<SearchBooksPage> {
     super.dispose();
   }
 
-  // Normalize bool-like values from API fields
+  // Small helper: safe bool parsing (fallback if server 'available' arrives without count)
   bool? _toBool(dynamic v) {
     if (v == null) return null;
     if (v is bool) return v;
@@ -69,201 +75,96 @@ class _SearchBooksPageState extends State<SearchBooksPage> {
     return null;
   }
 
-  // Heuristic availability from raw map
-  bool _computeAvailable(Map<String, dynamic> m) {
-    // use explicit flags when present
-    for (final k in [
-      'available',
-      'is_available',
-      'avalible',
-      'available_flag',
-    ]) {
-      final b = _toBool(m[k]);
-      if (b != null) return b;
-    }
-    // inverse of issued flag
-    for (final k in ['issued', 'is_issued', 'issued_flag']) {
-      final b = _toBool(m[k]);
-      if (b != null) return !b;
-    }
-    // status text
-    final status = (m['status'] ?? m['book_status'] ?? '')
-        .toString()
-        .toLowerCase();
-    if (status.contains('available')) return true;
-    if (status.contains('issued') ||
-        status.contains('unavailable') ||
-        status.contains('not available')) {
-      return false;
-    }
-    // if an issue date is present and no return date, treat as issued
-    final hasIssued = (m['issued_date'] ?? '').toString().trim().isNotEmpty;
-    final hasReturned = (m['return_date'] ?? '').toString().trim().isNotEmpty;
-    if (hasIssued && !hasReturned) return false;
-    // copies count
-    final ac =
-        (m['available_copies'] ?? m['copies_available'] ?? m['free_copies']);
-    final tc = (m['total_copies'] ?? m['copies_total']);
-    final acNum = ac is num ? ac.toInt() : int.tryParse((ac ?? '').toString());
-    final tcNum = tc is num ? tc.toInt() : int.tryParse((tc ?? '').toString());
-    if (acNum != null && acNum >= 0) {
-      if (tcNum != null && tcNum > 0) return acNum > 0;
-      return acNum > 0;
-    }
-    // default safer: unknown -> not available
-    return false;
-  }
-
   void _onQueryChanged(String q) {
     setState(() => _query = q);
     _debounce?.cancel();
-    if (q.trim().isEmpty) {
-      setState(() {
-        _results = [];
-        _availabilities = [];
-        _modeAll = false;
-      });
-      return;
-    }
     _debounce = Timer(const Duration(milliseconds: 350), () {
-      _search(q.trim());
+      final term = q.trim();
+      _loadAllBooks(search: term.isEmpty ? null : term);
     });
   }
 
-  // Keep one available copy when duplicates exist; if all are unavailable, keep all copies.
-  void _dedupeInPlaceByTitlePreferAvailable(
-    List<BookItem> items,
-    List<bool> avs,
-  ) {
-    if (items.isEmpty || items.length != avs.length) return;
-
-    String _normTitle(String t) =>
-        (t.isEmpty ? '(untitled)' : t).trim().toLowerCase();
-
-    // Build groups of indices by normalized title
-    final groups = <String, List<int>>{};
-    for (var i = 0; i < items.length; i++) {
-      final key = _normTitle(items[i].title);
-      (groups[key] ??= <int>[]).add(i);
-    }
-
-    final keep = List<bool>.filled(items.length, false);
-
-    for (final entry in groups.entries) {
-      final idxs = entry.value;
-      final anyAvail = idxs.any((i) => avs[i] || items[i].available);
-
-      if (anyAvail) {
-        // Keep exactly one available copy (first available encountered)
-        int chosen = idxs.first;
-        for (final i in idxs) {
-          if (avs[i] || items[i].available) {
-            chosen = i;
-            break;
-          }
-        }
-        keep[chosen] = true;
-      } else {
-        // If none are available, keep all copies for this title
-        for (final i in idxs) {
-          keep[i] = true;
-        }
-      }
-    }
-
-    // Rebuild lists preserving original order
-    final filteredItems = <BookItem>[];
-    final filteredAvs = <bool>[];
-    for (var i = 0; i < items.length; i++) {
-      if (keep[i]) {
-        filteredItems.add(items[i]);
-        filteredAvs.add(avs[i]);
-      }
-    }
-
-    items
-      ..clear()
-      ..addAll(filteredItems);
-    avs
-      ..clear()
-      ..addAll(filteredAvs);
-  }
-
-  Future<void> _search(String q) async {
+  Future<void> _loadAllBooks({String? search}) async {
     setState(() => _loading = true);
     try {
-      final ql = q.toLowerCase().trim();
-      // "all" => list ALL books (available + unavailable)
-      final wantAllBooks =
-          ql == 'all' || ql == 'all books' || ql == 'everything';
-      // "available" => list only available books
-      final wantOnlyAvailable =
-          ql == 'available' || ql == 'available books' || ql == 'all available';
-      _modeAll = wantAllBooks;
-      final rel = wantAllBooks
-          ? '/book-log/'
-          : (wantOnlyAvailable
-                ? '/book-log/?avalible=1'
-                : '/book-log/?search=${Uri.encodeComponent(q)}');
-      final candidates = <Uri>[
-        Uri.parse('$_base$rel'),
-        Uri.parse('$_base/api$rel'),
-      ];
-      List<BookItem> items = [];
-      List<bool> avs = [];
-      for (final u in candidates) {
-        try {
-          final r = await http.get(u).timeout(const Duration(seconds: 8));
-          debugPrint('GET $u -> ${r.statusCode}');
-          if (r.statusCode == 200) {
-            final data = json.decode(r.body);
-            if (data is List) {
-              items = [];
-              avs = [];
-              for (final e in data) {
-                if (e is Map<String, dynamic>) {
-                  items.add(BookItem.fromJson(e));
-                  avs.add(_computeAvailable(e));
-                }
-              }
-              break;
-            } else if (data is Map && data['results'] is List) {
-              // Optional: support paginated responses
-              final list = (data['results'] as List);
-              items = [];
-              avs = [];
-              for (final e in list) {
-                if (e is Map<String, dynamic>) {
-                  items.add(BookItem.fromJson(e));
-                  avs.add(_computeAvailable(e));
-                }
-              }
-              break;
-            } else if (data is Map && data['data'] is List) {
-              final list = (data['data'] as List);
-              items = [];
-              avs = [];
-              for (final e in list) {
-                if (e is Map<String, dynamic>) {
-                  items.add(BookItem.fromJson(e));
-                  avs.add(_computeAvailable(e));
-                }
-              }
-              break;
-            }
-          }
-        } catch (e) {
-          debugPrint('Search error for $u: $e');
-        }
+      // Always hit Books Log
+      final rel = (search != null && search.trim().isNotEmpty)
+          ? '/book-log/?search=${Uri.encodeComponent(search)}'
+          : '/book-log/';
+      final uri = Uri.parse('$_base$rel');
+
+      final r = await http.get(uri).timeout(const Duration(seconds: 8));
+      if (r.statusCode != 200) {
+        if (!mounted) return;
+        setState(() {
+          _results = [];
+          _availabilities = [];
+          _availableCounts = [];
+        });
+        return;
       }
 
-      // Apply dedupe: for duplicate titles, keep only one, preferring available
-      _dedupeInPlaceByTitlePreferAvailable(items, avs);
+      final data = json.decode(r.body);
+      Iterable list;
+      if (data is List) {
+        list = data;
+      } else if (data is Map && data['results'] is List) {
+        list = data['results'];
+      } else if (data is Map && data['data'] is List) {
+        list = data['data'];
+      } else {
+        list = const [];
+      }
+
+      final items = <BookItem>[];
+      final avs = <bool>[];
+      final counts = <int>[];
+
+      for (final e in list) {
+        if (e is! Map<String, dynamic>) continue;
+
+        // Normalize Books Log JSON to BookItem fields before parsing
+        final normalized = <String, dynamic>{
+          // BookItem friendly keys
+          'title': e['book_title'] ?? e['title'] ?? '',
+          'author': e['book_author'] ?? e['auther'] ?? '',
+          'isbn': e['book_barcode'] ?? e['isbn'] ?? '',
+          // Preserve any existing fields (cover, etc.)
+          ...e,
+        };
+
+        // Build BookItem
+        items.add(BookItem.fromJson(normalized));
+
+        // Count and availability
+        final rawCount = e['available_count'];
+        final hasCount = rawCount != null;
+        final count = rawCount is num
+            ? rawCount.toInt()
+            : int.tryParse((rawCount ?? '').toString()) ?? 0;
+
+        // If available_count exists, it is authoritative
+        final avail = hasCount
+            ? (count > 0)
+            : (_toBool(e['available']) ?? false);
+
+        counts.add(count);
+        avs.add(avail);
+      }
 
       if (!mounted) return;
       setState(() {
         _results = items;
         _availabilities = avs;
+        _availableCounts = counts;
+      });
+    } catch (e) {
+      debugPrint('Load books error: $e');
+      if (!mounted) return;
+      setState(() {
+        _results = [];
+        _availabilities = [];
+        _availableCounts = [];
       });
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -275,10 +176,7 @@ class _SearchBooksPageState extends State<SearchBooksPage> {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text(
-          'Search Books',
-          style: TextStyle(color: Colors.white),
-        ),
+        title: const Text('Books', style: TextStyle(color: Colors.white)),
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
@@ -300,7 +198,7 @@ class _SearchBooksPageState extends State<SearchBooksPage> {
           SafeArea(
             child: Column(
               children: [
-                // Search bar
+                // Search bar (by title or author)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                   child: TextField(
@@ -312,8 +210,7 @@ class _SearchBooksPageState extends State<SearchBooksPage> {
                     ),
                     cursorColor: _accent,
                     decoration: InputDecoration(
-                      hintText:
-                          'Search by title or author (or try "all" for all books)',
+                      hintText: 'Search by book name or author',
                       hintStyle: const TextStyle(color: _muted),
                       filled: true,
                       fillColor: Colors.white.withOpacity(0.96),
@@ -330,6 +227,15 @@ class _SearchBooksPageState extends State<SearchBooksPage> {
                               ),
                             )
                           : const Icon(Icons.search, color: _muted),
+                      suffixIcon: (_query.isNotEmpty)
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, color: _muted),
+                              onPressed: () {
+                                _controller.clear();
+                                _onQueryChanged('');
+                              },
+                            )
+                          : null,
                       contentPadding: const EdgeInsets.symmetric(
                         vertical: 12,
                         horizontal: 12,
@@ -352,41 +258,8 @@ class _SearchBooksPageState extends State<SearchBooksPage> {
                     ),
                   ),
                 ),
-                if (_modeAll)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-                    child: Row(
-                      children: const [
-                        Icon(
-                          Icons.info_outline,
-                          size: 16,
-                          color: Colors.white70,
-                        ),
-                        SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            'Showing all books (available and issued)',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                const SizedBox(height: 4),
-                // Results
                 Expanded(
-                  child: _query.isEmpty
-                      ? const Center(
-                          child: Text(
-                            'Start typing to search…',
-                            style: TextStyle(color: Colors.white70),
-                          ),
-                        )
-                      : _loading && _results.isEmpty
+                  child: _loading && _results.isEmpty
                       ? const Center(child: CircularProgressIndicator())
                       : _results.isEmpty
                       ? const Center(
@@ -395,137 +268,152 @@ class _SearchBooksPageState extends State<SearchBooksPage> {
                             style: TextStyle(color: Colors.white70),
                           ),
                         )
-                      : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                          itemCount: _results.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 10),
-                          itemBuilder: (context, i) {
-                            final b = _results[i];
-                            final dpr = MediaQuery.of(context).devicePixelRatio;
-                            final cacheW = (56 * dpr).round();
-                            final cacheH = (72 * dpr).round();
-                            return Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(14),
-                                onTap: () {
-                                  debugPrint('Tapped book: ${b.title}');
-                                  // Push on root navigator using named route
-                                  Navigator.of(
-                                    context,
-                                    rootNavigator: true,
-                                  ).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => BookDetailsPage(
-                                        book: b,
-                                        username: widget.username, // added
-                                        userBarcode:
-                                            widget.userBarcode, // added
-                                      ),
-                                    ),
-                                  );
-                                },
-                                child: Container(
-                                  decoration: _rowMint(),
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 10,
-                                    horizontal: 10,
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      ClipRRect(
-                                        borderRadius: BorderRadius.circular(10),
-                                        child: Container(
-                                          width: 56,
-                                          height: 72,
-                                          decoration: BoxDecoration(
-                                            gradient: const LinearGradient(
-                                              colors: [
-                                                Color(0xFF7C3AED),
-                                                _accent,
-                                              ],
-                                              begin: Alignment.topLeft,
-                                              end: Alignment.bottomRight,
-                                            ),
-                                            borderRadius: BorderRadius.circular(
-                                              10,
-                                            ),
-                                          ),
-                                          child: (b.cover ?? '').isNotEmpty
-                                              ? Image.network(
-                                                  b.cover!,
-                                                  fit: BoxFit.cover,
-                                                  filterQuality:
-                                                      FilterQuality.low,
-                                                  cacheWidth: cacheW,
-                                                  cacheHeight: cacheH,
-                                                  errorBuilder: (_, __, ___) =>
-                                                      const Icon(
-                                                        Icons.book,
-                                                        color: Colors.white54,
-                                                      ),
-                                                )
-                                              : const Icon(
-                                                  Icons.menu_book_rounded,
-                                                  color: Colors.white,
-                                                  size: 28,
-                                                ),
+                      : RefreshIndicator(
+                          onRefresh: () => _loadAllBooks(
+                            search: _query.trim().isEmpty
+                                ? null
+                                : _query.trim(),
+                          ),
+                          child: ListView.separated(
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                            itemCount: _results.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 10),
+                            itemBuilder: (context, i) {
+                              final b = _results[i];
+                              final dpr = MediaQuery.of(
+                                context,
+                              ).devicePixelRatio;
+                              final cacheW = (56 * dpr).round();
+                              final cacheH = (72 * dpr).round();
+                              return Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(14),
+                                  onTap: () {
+                                    Navigator.of(
+                                      context,
+                                      rootNavigator: true,
+                                    ).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => BookDetailsPage(
+                                          book: b,
+                                          username: widget.username,
+                                          userBarcode: widget.userBarcode,
                                         ),
                                       ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              b.title.isEmpty
-                                                  ? '(Untitled)'
-                                                  : b.title,
-                                              style: const TextStyle(
-                                                color: _ink,
-                                                fontWeight: FontWeight.w700,
-                                                fontSize: 16,
+                                    );
+                                  },
+                                  child: Container(
+                                    decoration: _rowMint(),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 10,
+                                      horizontal: 10,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                          child: Container(
+                                            width: 56,
+                                            height: 72,
+                                            decoration: BoxDecoration(
+                                              gradient: const LinearGradient(
+                                                colors: [
+                                                  Color(0xFF7C3AED),
+                                                  _accent,
+                                                ],
+                                                begin: Alignment.topLeft,
+                                                end: Alignment.bottomRight,
                                               ),
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
                                             ),
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              b.author,
-                                              style: const TextStyle(
-                                                color: _muted,
-                                                fontSize: 13,
+                                            child: (b.cover ?? '').isNotEmpty
+                                                ? Image.network(
+                                                    b.cover!,
+                                                    fit: BoxFit.cover,
+                                                    filterQuality:
+                                                        FilterQuality.low,
+                                                    cacheWidth: cacheW,
+                                                    cacheHeight: cacheH,
+                                                    errorBuilder:
+                                                        (
+                                                          _,
+                                                          __,
+                                                          ___,
+                                                        ) => const Icon(
+                                                          Icons.book,
+                                                          color: Colors.white54,
+                                                        ),
+                                                  )
+                                                : const Icon(
+                                                    Icons.menu_book_rounded,
+                                                    color: Colors.white,
+                                                    size: 28,
+                                                  ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                b.title.isEmpty
+                                                    ? '(Untitled)'
+                                                    : b.title,
+                                                style: const TextStyle(
+                                                  color: _ink,
+                                                  fontWeight: FontWeight.w700,
+                                                  fontSize: 16,
+                                                ),
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
                                               ),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                            if (b.isbn.isNotEmpty) ...[
                                               const SizedBox(height: 4),
                                               Text(
-                                                'ISBN: ${b.isbn}',
+                                                b.author,
                                                 style: const TextStyle(
                                                   color: _muted,
-                                                  fontSize: 12,
+                                                  fontSize: 13,
                                                 ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
                                               ),
+                                              if (b.isbn.isNotEmpty) ...[
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  'ISBN: ${b.isbn}',
+                                                  style: const TextStyle(
+                                                    color: _muted,
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                              ],
                                             ],
-                                          ],
+                                          ),
                                         ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      _AvailabilityChip(
-                                        available: (i < _availabilities.length)
-                                            ? _availabilities[i]
-                                            : b.available,
-                                      ),
-                                    ],
+                                        const SizedBox(width: 8),
+                                        _AvailabilityChip(
+                                          available:
+                                              (i < _availabilities.length)
+                                              ? _availabilities[i]
+                                              : false,
+                                          count: (i < _availableCounts.length)
+                                              ? _availableCounts[i]
+                                              : 0,
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
-                              ),
-                            );
-                          },
+                              );
+                            },
+                          ),
                         ),
                 ),
               ],
@@ -537,9 +425,11 @@ class _SearchBooksPageState extends State<SearchBooksPage> {
   }
 }
 
+// Update chip to show count if provided
 class _AvailabilityChip extends StatelessWidget {
   final bool available;
-  const _AvailabilityChip({Key? key, required this.available})
+  final int? count; // added
+  const _AvailabilityChip({Key? key, required this.available, this.count})
     : super(key: key);
 
   @override
@@ -549,6 +439,9 @@ class _AvailabilityChip extends StatelessWidget {
         : Colors.red.withOpacity(0.12);
     final fg = available ? Colors.green[800]! : Colors.red[800]!;
     final icon = available ? Icons.check_circle : Icons.cancel;
+    final label = count == null
+        ? (available ? 'Available' : 'Unavailable')
+        : (available ? 'Available ($count)' : 'Unavailable ($count)');
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
@@ -561,7 +454,7 @@ class _AvailabilityChip extends StatelessWidget {
           Icon(icon, color: fg, size: 16),
           const SizedBox(width: 6),
           Text(
-            available ? 'Available' : 'Unavailable',
+            label,
             style: TextStyle(color: fg, fontWeight: FontWeight.w700),
           ),
         ],

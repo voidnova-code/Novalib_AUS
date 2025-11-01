@@ -4,10 +4,12 @@ from django.views.decorators.csrf import csrf_exempt
 from django.core.mail import send_mail
 from novalib.models import User, Login, Notification, DeveloperNotification
 from novalib.models import BooksLog  # fixed import
+from novalib.models import BooksDetail  # new import for issued/held book details
 from django.utils.timezone import now, timedelta
-from django.db.models import Q
+from django.db.models import Q, Count
 import json
 import random
+from collections import defaultdict
 
 @csrf_exempt
 def ping(request):
@@ -199,18 +201,50 @@ def notifications(request):
         })
     return JsonResponse(data, safe=False)
 
+def _coerce_bool(v):
+    """Coerce DB values like True/False/1/0/'true'/'false'/'yes'/'no' to a Python bool."""
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return v != 0
+    s = str(v).strip().lower()
+    if s in ('1', 'true', 'yes', 'y'):
+        return True
+    if s in ('0', 'false', 'no', 'n', ''):
+        return False
+    # fallback: any other non-empty strings treated as False (safe)
+    return False
+
+def _to_int(v):
+    """Parse any numeric-like value to int; returns 0 on failure."""
+    try:
+        if v is None:
+            return 0
+        if isinstance(v, (int, float)):
+            return int(v)
+        s = str(v).strip()
+        return int(s) if s else 0
+    except Exception:
+        return 0
+
+def _normalize_key(title, author):
+    """Normalize (title, author) tuple for consistent dict lookups."""
+    t = (title or '').strip()
+    a = (author or '').strip()
+    return (t.lower(), a.lower())
+
 @csrf_exempt
 def book_log_list(request):
     """
     API endpoint to list/search issued books from BooksLog.
     Supports user filters via:
-      - ?username= (full display name)
-      - ?barcode= or ?barcode_number=
+      - ?username= (full display name) or X-User header
+      - ?barcode= or ?barcode_number= or X-User-Barcode header
       - ?email=
-      - ?user_id=
+      - ?user_id= or X-User-Id header
     And optional ?search= for title/author/barcode.
-    If a user is resolved, return only that user's issued books (avalible=False).
-    Otherwise, return global list (optionally filtered by ?search).
+    If a user is resolved, return only that user's issued books (sourced from BooksDetail).
+    Otherwise, return global BooksLog list (optionally filtered by ?search).
     """
     if request.method == 'GET':
         search = (request.GET.get('search') or '').strip()
@@ -221,7 +255,21 @@ def book_log_list(request):
         wishlist_param = (request.GET.get('wishlist') or '').strip().lower()
         avalible_param = (request.GET.get('avalible') or '').strip().lower()
 
-        logs = BooksLog.objects.all().order_by('-issued_date')
+        # also accept user identity from headers (helpful for app pages that cannot set query params)
+        header_user = (request.META.get('HTTP_X_USER') or request.META.get('HTTP_X_USERNAME') or '').strip()
+        header_barcode = (request.META.get('HTTP_X_USER_BARCODE') or request.META.get('HTTP_X_BARCODE') or '').strip()
+        header_user_id = (request.META.get('HTTP_X_USER_ID') or '').strip()
+
+        # prefer explicit query params; fall back to headers
+        if not username and header_user:
+            username = header_user
+        if not barcode and header_barcode:
+            barcode = header_barcode
+        if not user_id and header_user_id:
+            user_id = header_user_id
+
+        # issued_date was moved to BooksDetail; order by id here to avoid FieldError.
+        logs = BooksLog.objects.all().order_by('-id')
 
         # Resolve users first if any identifier is provided
         users_qs = None
@@ -244,6 +292,7 @@ def book_log_list(request):
                 q |= Q(barcode_number__iexact=username) | Q(email__iexact=username)
             users_qs = users.filter(q)
 
+        # REMOVE any global pre-aggregation of counts
         # Parse avalible filter if provided
         avalible_value = None
         if avalible_param in ('1', 'true', 'yes'):
@@ -251,7 +300,7 @@ def book_log_list(request):
         elif avalible_param in ('0', 'false', 'no'):
             avalible_value = False
 
-        # Wishlist branch
+        # Wishlist branch (still uses BooksLog)
         if users_qs is not None and wishlist_param in ('1', 'true', 'yes'):
             logs = BooksLog.objects.filter(wishlist__in=users_qs).distinct()
             if search:
@@ -260,20 +309,48 @@ def book_log_list(request):
                     Q(auther__icontains=search) |
                     Q(book_barcode__icontains=search)
                 )
+
         # Issued-books branch
         elif users_qs is not None:
-            logs = logs.filter(user__in=users_qs)
-            # default to issued (avalible=False) unless explicitly overridden
+            details = BooksDetail.objects.filter(user__in=users_qs)
             if avalible_value is None:
-                logs = logs.filter(avalible=False)
+                details = details.filter(avalible=False)
             else:
-                logs = logs.filter(avalible=avalible_value)
+                details = details.filter(avalible=avalible_value)
             if search:
-                logs = logs.filter(
+                details = details.filter(
                     Q(book_title__icontains=search) |
                     Q(auther__icontains=search) |
                     Q(book_barcode__icontains=search)
                 )
+
+            # Pre-compute available_count per (title, author) from BooksDetail (unassigned + available)
+            avail_count_map = {}
+            for row in (BooksDetail.objects
+                        .filter(user__isnull=True, avalible=True)
+                        .values('book_title', 'auther')
+                        .annotate(c=Count('id'))):
+                key = _normalize_key(row.get('book_title'), row.get('auther'))
+                avail_count_map[key] = row['c']
+
+            data = []
+            for d in details.order_by('-id'):
+                title = (getattr(d, 'book_title', '') or '').strip()
+                author = (getattr(d, 'auther', '') or '').strip()
+                key = _normalize_key(title, author)
+                avail_count = int(avail_count_map.get(key, 0))
+                data.append({
+                    'book_title': title,
+                    'book_author': author,
+                    'book_barcode': getattr(d, 'book_barcode', ''),
+                    'available': (avail_count > 0),
+                    'available_count': avail_count,
+                    'issued_date': getattr(d, 'issued_date', None),
+                    'return_date': getattr(d, 'return_date', None),
+                    'username': (f"{getattr(d.user, 'first_name', '')} {getattr(d.user, 'last_name', '')}").strip() if getattr(d, 'user', None) else '',
+                })
+            return JsonResponse(data, safe=False)
+
         else:
             # Global listing/search (no user identified)
             if avalible_value is not None:
@@ -285,14 +362,27 @@ def book_log_list(request):
                     Q(book_barcode__icontains=search)
                 )
 
+        # Pre-compute available_count per (title, author) for global listing from BooksDetail (unassigned + available)
+        avail_count_map = {}
+        for row in (BooksDetail.objects
+                    .filter(user__isnull=True, avalible=True)
+                    .values('book_title', 'auther')
+                    .annotate(c=Count('id'))):
+            key = _normalize_key(row.get('book_title'), row.get('auther'))
+            avail_count_map[key] = row['c']
+
         data = []
         for log in logs:
+            title = (getattr(log, 'book_title', '') or '').strip()
+            author = (getattr(log, 'auther', '') or '').strip()
+            key = _normalize_key(title, author)
+            avail_count = int(avail_count_map.get(key, 0))
             data.append({
-                'book_title': getattr(log, 'book_title', ''),
-                'book_author': getattr(log, 'auther', ''),
+                'book_title': title,
+                'book_author': author,
                 'book_barcode': getattr(log, 'book_barcode', ''),
-                # normalize backend 'avalible' typo to a stable 'available' flag
-                'available': bool(getattr(log, 'avalible', False)),
+                'available': (avail_count > 0),
+                'available_count': avail_count,
                 'issued_date': getattr(log, 'issued_date', None),
                 'return_date': getattr(log, 'return_date', None),
                 'username': (f"{getattr(log.user, 'first_name', '')} {getattr(log.user, 'last_name', '')}").strip() if getattr(log, 'user', None) else '',
@@ -343,7 +433,7 @@ def user_wishlist(request):
         return JsonResponse([], safe=False)
 
     # Fetch BooksLog entries where wishlist includes the resolved users
-    logs = BooksLog.objects.filter(wishlist__in=users_qs).distinct().order_by('-issued_date')
+    logs = BooksLog.objects.filter(wishlist__in=users_qs).distinct().order_by('-id')
 
     if search:
         logs = logs.filter(
@@ -360,7 +450,7 @@ def user_wishlist(request):
             'issued_date': getattr(log, 'issued_date', None),
             'return_date': getattr(log, 'return_date', None),
             'book_barcode': getattr(log, 'book_barcode', ''),
-            'available': bool(getattr(log, 'avalible', False)),
+            'available': _coerce_bool(getattr(log, 'avalible', False)),  # was bool(...), now coerced
             # include wishlist users for debugging if needed
             'wishlist_users': [f"{u.first_name} {u.last_name}".strip() for u in log.wishlist.all()],
         })
@@ -515,3 +605,88 @@ def wishlist(request):
         'book_barcode': getattr(book, 'book_barcode', ''),
         'user': {'id': user.id, 'name': f'{user.first_name} {user.last_name}'.strip()},
     }, status=200)
+
+@csrf_exempt
+def books_detail_list(request):
+    """
+    API endpoint to list/search issued books from BooksDetail.
+    Supports same filters as book_log_list:
+      - ?username=, ?barcode=, ?email=, ?user_id=
+      - ?search= for title/author/barcode
+      - ?avalible= (true/false)
+    If a user is resolved, return BooksDetail rows assigned to that user.
+    """
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Invalid request'}, status=400)
+    
+    search = (request.GET.get('search') or '').strip()
+    username = (request.GET.get('username') or '').strip()
+    barcode = (request.GET.get('barcode') or request.GET.get('barcode_number') or '').strip()
+    email = (request.GET.get('email') or '').strip()
+    user_id = (request.GET.get('user_id') or '').strip()
+    avalible_param = (request.GET.get('avalible') or '').strip().lower()
+
+    qs = BooksDetail.objects.all().order_by('-id')
+
+    # Resolve users if identifier provided (reuse logic similar to book_log_list)
+    users_qs = None
+    if barcode or user_id or email or username:
+        users = User.objects.all()
+        q = Q()
+        if barcode:
+            q |= Q(barcode_number__iexact=barcode)
+        if user_id.isdigit():
+            q |= Q(id=int(user_id))
+        if email:
+            q |= Q(email__iexact=email)
+        if username:
+            parts = [p for p in username.split() if p]
+            if len(parts) >= 2:
+                q |= (Q(first_name__iexact=parts[0]) & Q(last_name__iexact=parts[-1]))
+            q |= Q(first_name__icontains=username) | Q(last_name__icontains=username)
+            q |= Q(barcode_number__iexact=username) | Q(email__iexact=username)
+        users_qs = users.filter(q)
+
+    # parse avalible filter
+    avalible_value = None
+    if avalible_param in ('1', 'true', 'yes'):
+        avalible_value = True
+    elif avalible_param in ('0', 'false', 'no'):
+        avalible_value = False
+
+    # If user(s) resolved: return only books assigned to those users
+    if users_qs is not None:
+        qs = qs.filter(user__in=users_qs)
+        # optionally filter by availability if provided
+        if avalible_value is not None:
+            qs = qs.filter(avalible=avalible_value)
+        # search filtering
+        if search:
+            qs = qs.filter(
+                Q(book_title__icontains=search) |
+                Q(auther__icontains=search) |
+                Q(book_barcode__icontains=search)
+            )
+    else:
+        # global listing/search
+        if avalible_value is not None:
+            qs = qs.filter(avalible=avalible_value)
+        if search:
+            qs = qs.filter(
+                Q(book_title__icontains=search) |
+                Q(auther__icontains=search) |
+                Q(book_barcode__icontains=search)
+            )
+
+    data = []
+    for item in qs:
+        data.append({
+            'book_title': getattr(item, 'book_title', ''),
+            'book_author': getattr(item, 'auther', ''),
+            'book_barcode': getattr(item, 'book_barcode', ''),
+            'available': _coerce_bool(getattr(item, 'avalible', False)),  # fixed
+            'issued_date': getattr(item, 'issued_date', None),
+            'return_date': getattr(item, 'return_date', None),
+            'username': (f"{getattr(item.user, 'first_name', '')} {getattr(item.user, 'last_name', '')}").strip() if getattr(item, 'user', None) else '',
+        })
+    return JsonResponse(data, safe=False)

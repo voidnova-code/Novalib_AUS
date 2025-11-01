@@ -18,6 +18,7 @@ class IssuedBooksPage extends StatefulWidget {
 class _IssuedBooksPageState extends State<IssuedBooksPage> {
   bool _loading = true;
   List<Map<String, String>> _books = [];
+  dynamic _rawApiData; // <-- Add this line
 
   @override
   void initState() {
@@ -26,65 +27,114 @@ class _IssuedBooksPageState extends State<IssuedBooksPage> {
   }
 
   Future<void> _fetchIssuedBooks() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _rawApiData = null;
+    });
 
-    List<Map<String, String>> parseList(dynamic body) {
-      if (body is! List) return [];
-      return body
-          .map<Map<String, String>>((item) {
-            final m = item as Map<String, dynamic>;
-            return {
-              'title': (m['book_title'] ?? '').toString(),
-              'author': (m['book_author'] ?? m['auther'] ?? '').toString(),
-              'issued_date': (m['issued_date'] ?? '').toString(),
-              'return_date': (m['return_date'] ?? '').toString(),
-            };
-          })
-          .where((m) => (m['title'] ?? '').isNotEmpty)
-          .toList();
-    }
-
-    Future<List<Map<String, String>>> tryUrl(Uri url) async {
+    // Resilient list fetcher (supports wrappers)
+    Future<List<Map<String, dynamic>>> _getJsonList(Uri url) async {
       try {
-        final r = await http.get(url).timeout(const Duration(seconds: 8));
+        final r = await http.get(url).timeout(const Duration(seconds: 12));
         if (r.statusCode != 200) return [];
-        return parseList(json.decode(r.body));
+        final decoded = json.decode(r.body);
+
+        List items;
+        if (decoded is List) {
+          items = decoded;
+        } else if (decoded is Map) {
+          if (decoded['results'] is List) {
+            items = decoded['results'];
+          } else if (decoded['data'] is List) {
+            items = decoded['data'];
+          } else if (decoded['items'] is List) {
+            items = decoded['items'];
+          } else if (decoded['rows'] is List) {
+            items = decoded['rows'];
+          } else {
+            return [];
+          }
+        } else {
+          return [];
+        }
+
+        final out = <Map<String, dynamic>>[];
+        for (final e in items) {
+          if (e is Map) out.add(e.map((k, v) => MapEntry(k.toString(), v)));
+        }
+        return out;
       } catch (_) {
         return [];
       }
+    }
+
+    // Match against books-detail "username" primarily (fallbacks kept)
+    bool _matchesUserFromDetails(Map<String, dynamic> m) {
+      String _norm(String s) => s.trim().toLowerCase();
+      final userStr = (m['username'] ?? m['user'] ?? m['issued_to'] ?? '')
+          .toString()
+          .toLowerCase();
+      if (userStr.isEmpty) return false;
+      final uname = _norm(widget.username);
+      final ucode = _norm(widget.userBarcode ?? '');
+      if (uname.isNotEmpty && userStr.contains(uname)) return true;
+      if (ucode.isNotEmpty && userStr.contains(ucode)) return true;
+      if (uname.isNotEmpty && int.tryParse(uname) != null)
+        return userStr.contains(uname);
+      return false;
     }
 
     try {
       final base = djangoBaseUrl.endsWith('/')
           ? djangoBaseUrl.substring(0, djangoBaseUrl.length - 1)
           : djangoBaseUrl;
-      final uname = Uri.encodeComponent(widget.username);
-      final barcode = widget.userBarcode != null
-          ? Uri.encodeComponent(widget.userBarcode!)
-          : '';
 
+      // Try server-side availability filtering first (available=false)
       final attempts = <Uri>[
-        if (barcode.isNotEmpty)
-          Uri.parse('$base/book-log/?barcode=$barcode&avalible=0'),
-        if (barcode.isNotEmpty) Uri.parse('$base/book-log/?barcode=$barcode'),
-        Uri.parse('$base/book-log/?username=$uname&avalible=0'),
-        Uri.parse('$base/book-log/?username=$uname'),
-        Uri.parse('$base/book-log/?email=$uname&avalible=0'),
-        if (int.tryParse(widget.username) != null)
-          Uri.parse('$base/book-log/?user_id=${widget.username}&avalible=0'),
-        Uri.parse('$base/book-log/?avalible=0'),
-        Uri.parse('$base/book-log/'),
+        Uri.parse('$base/books-detail/?available=0'),
+        Uri.parse('$base/books-detail/?available=false'),
+        Uri.parse(
+          '$base/books-detail/?avalible=0',
+        ), // fallback if typo on backend
+        Uri.parse('$base/books-detail/'),
       ];
 
-      List<Map<String, String>> found = [];
+      List<Map<String, dynamic>> rows = [];
       for (final u in attempts) {
-        found = await tryUrl(u);
-        if (found.isNotEmpty) break;
+        rows = await _getJsonList(u);
+        if (rows.isNotEmpty) break;
       }
+      _rawApiData = rows;
+
+      // Only books held by this user => rows where username matches
+      final heldForUser = rows.where(_matchesUserFromDetails).toList();
+
+      // Map using table fields
+      String _pickS(Map<String, dynamic> m, List<String> keys) {
+        for (final k in keys) {
+          final v = m[k];
+          if (v == null) continue;
+          final s = v.toString().trim();
+          if (s.isNotEmpty) return s;
+        }
+        return '';
+      }
+
+      final result = heldForUser
+          .map<Map<String, String>>((m) {
+            return {
+              'title': _pickS(m, ['book_title', 'title']),
+              'author': _pickS(m, ['book_author', 'author']),
+              'issued_date': _pickS(m, ['issued_date']),
+              'return_date': _pickS(m, ['return_date']),
+            };
+          })
+          .where((m) => (m['title'] ?? '').isNotEmpty)
+          .toList();
 
       if (!mounted) return;
       setState(() {
-        _books = found;
+        _books = result;
         _loading = false;
       });
     } catch (_) {
@@ -122,14 +172,34 @@ class _IssuedBooksPageState extends State<IssuedBooksPage> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _books.isEmpty
-                ? const Center(
-                    child: Text(
-                      'No books found.',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
+                ? SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const SizedBox(height: 100),
+                        const Text(
+                          'No books found.',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        if (_rawApiData != null)
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            color: Colors.black12,
+                            child: Text(
+                              'API Response:\n${_rawApiData.toString()}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   )
                 : ListView.separated(

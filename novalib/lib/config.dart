@@ -1,7 +1,7 @@
 // Central configuration file for NovaLib app
 
 // Django backend base URL
-const String djangoBaseUrl ='http://192.168.182.28:8000/'; // Update this to your server's URL
+const String djangoBaseUrl ='http://192.168.240.28:8000/'; // Update this to your server's URL
 
 
 // Search configuration

@@ -488,17 +488,10 @@ class _HomePageState extends State<HomePage> {
       return body
           .map<Map<String, String>>((item) {
             final m = item as Map<String, dynamic>;
-            final ownerRaw =
-                (m['username'] ??
-                        m['user'] ??
-                        m['issued_to'] ??
-                        m['borrower'] ??
-                        m['student'] ??
-                        '')
-                    .toString();
+            final ownerRaw = (m['user'] ?? m['username'] ?? m['issued_to'] ?? m['borrower'] ?? m['student'] ?? '').toString();
             return {
-              'title': (m['book_title'] ?? '').toString(),
-              'author': (m['book_author'] ?? m['auther'] ?? '').toString(),
+              'title': (m['book_title'] ?? m['title'] ?? '').toString(),
+              'author': (m['book_author'] ?? m['auther'] ?? m['author'] ?? '').toString(),
               'issued_date': (m['issued_date'] ?? '').toString(),
               'return_date': (m['return_date'] ?? '').toString(),
               'owner': ownerRaw,
@@ -519,26 +512,22 @@ class _HomePageState extends State<HomePage> {
     }
 
     try {
-      final baseUrl = djangoBaseUrl.endsWith('/')
-          ? djangoBaseUrl.substring(0, djangoBaseUrl.length - 1)
-          : djangoBaseUrl;
+      final baseUrl = djangoBaseUrl.endsWith('/') ? djangoBaseUrl.substring(0, djangoBaseUrl.length - 1) : djangoBaseUrl;
       final uname = Uri.encodeComponent(widget.username);
-      final barcode = widget.userBarcode != null
-          ? Uri.encodeComponent(widget.userBarcode!)
-          : '';
+      final barcode = widget.userBarcode != null ? Uri.encodeComponent(widget.userBarcode!) : '';
 
-      // Try multiple identifiers, then global fallbacks
+      // Try BooksDetail endpoints first (server model is BooksDetail)
       final attempts = <Uri>[
-        if (barcode.isNotEmpty)
-          Uri.parse('$baseUrl/book-log/?barcode=$barcode&avalible=0'),
-        if (barcode.isNotEmpty)
-          Uri.parse('$baseUrl/book-log/?barcode=$barcode'),
-        Uri.parse('$baseUrl/book-log/?username=$uname&avalible=0'),
+        if (barcode.isNotEmpty) Uri.parse('$baseUrl/books-detail/?barcode=$barcode'),
+        if (barcode.isNotEmpty) Uri.parse('$baseUrl/books-detail/?barcode=$barcode&avalible=0'),
+        Uri.parse('$baseUrl/books-detail/?username=$uname'),
+        Uri.parse('$baseUrl/books-detail/?username=$uname&avalible=0'),
+        if (int.tryParse(widget.username) != null) Uri.parse('$baseUrl/books-detail/?user_id=${widget.username}'),
+        Uri.parse('$baseUrl/books-detail/?avalible=0'),
+        Uri.parse('$baseUrl/books-detail/'),
+        // Fallback to book-log if books-detail not available
+        Uri.parse('$baseUrl/book-log/?barcode=$barcode'),
         Uri.parse('$baseUrl/book-log/?username=$uname'),
-        Uri.parse('$baseUrl/book-log/?email=$uname&avalible=0'),
-        if (int.tryParse(widget.username) != null)
-          Uri.parse('$baseUrl/book-log/?user_id=${widget.username}&avalible=0'),
-        Uri.parse('$baseUrl/book-log/?avalible=0'),
         Uri.parse('$baseUrl/book-log/'),
       ];
 
@@ -549,28 +538,27 @@ class _HomePageState extends State<HomePage> {
         if (found.isNotEmpty) break;
       }
 
+      // Keep only entries actually assigned to this user.
       if (found.isNotEmpty) {
-        String norm(String s) => s.toLowerCase().trim();
-        final userTok = norm(
-          widget.username,
-        ).split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toSet();
+        final norm = (String s) => s.toLowerCase().trim();
+        final unameNorm = norm(widget.username);
+        final unameTokens = unameNorm.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toSet();
+        final barcodeRaw = (widget.userBarcode ?? '').toLowerCase().trim();
+        final userIdRaw = int.tryParse(widget.username) != null ? widget.username : '';
 
-        List<Map<String, String>> filtered = found.where((b) {
-          final owner = norm(b['owner'] ?? '');
-          if (owner.isEmpty) return true; // cannot filter without owner
-          final ownTok = owner
-              .split(RegExp(r'\s+'))
-              .where((t) => t.isNotEmpty)
-              .toSet();
-          final overlap = userTok.intersection(ownTok).isNotEmpty;
-          return overlap ||
-              owner.contains(norm(widget.username)) ||
-              norm(widget.username).contains(owner);
+        found = found.where((b) {
+          final owner = (b['owner'] ?? '').toLowerCase().trim();
+          if (owner.isEmpty) return false; // require an owner for BooksDetail entries
+          // Match by barcode if available in owner or item (owner may be id/string)
+          if (barcodeRaw.isNotEmpty && owner.contains(barcodeRaw)) return true;
+          // Match by numeric user id
+          if (userIdRaw.isNotEmpty && owner.contains(userIdRaw)) return true;
+          // Token overlap or substring match with username
+          final ownerTokens = owner.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toSet();
+          if (unameTokens.intersection(ownerTokens).isNotEmpty) return true;
+          if (owner.contains(unameNorm) || unameNorm.contains(owner)) return true;
+          return false;
         }).toList();
-
-        if (filtered.isNotEmpty) {
-          found = filtered;
-        }
       }
 
       if (!mounted) return;
@@ -584,9 +572,7 @@ class _HomePageState extends State<HomePage> {
         _issuedBooks = [];
       });
     } finally {
-      if (mounted) {
-        setState(() => _isBooksLoading = false);
-      }
+      if (mounted) setState(() => _isBooksLoading = false);
     }
   }
 
