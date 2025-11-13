@@ -8,6 +8,7 @@ import 'WishList_page/wishlist.dart'; // already imported
 import 'common_pages/issued_books_page.dart'; // added
 import 'common_pages/pay_fine_page.dart'; // added
 import 'common_pages/search_books_page.dart';
+import 'package:carousel_slider/carousel_slider.dart';
 
 // Two-color mixed background (aesthetic gradient)
 // Feel free to tweak these four colors; the background animates between pairs.
@@ -21,6 +22,228 @@ const _ink = Color(0xFF1F2544);
 const _muted = Color(0xFF6B7280);
 // Accent
 const _accent = Color(0xFF5B6BFF);
+
+// Model for recommendation items
+class RecommendationItem {
+  final String id;
+  final String title;
+  final String author;
+  final String coverUrl;
+
+  const RecommendationItem({
+    required this.id,
+    required this.title,
+    required this.author,
+    required this.coverUrl,
+  });
+}
+
+// Carousel widget for recommendations
+class RecommendationCarousel extends StatelessWidget {
+  final List<RecommendationItem> items;
+  final VoidCallback? onTap;
+
+  const RecommendationCarousel({
+    Key? key,
+    required this.items,
+    this.onTap,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) {
+      return Container(
+        height: 250,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.all(24),
+        child: const Text(
+          'No recommendations yet',
+          style: TextStyle(
+            color: Colors.white70,
+            fontSize: 16,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      );
+    }
+
+    return CarouselSlider.builder(
+      itemCount: items.length,
+      options: CarouselOptions(
+        height: 250,
+        enlargeCenterPage: true,
+        viewportFraction: 0.68,
+        enableInfiniteScroll: items.length > 1,
+        autoPlay: true,
+        autoPlayInterval: const Duration(seconds: 4),
+        autoPlayAnimationDuration: const Duration(milliseconds: 800),
+        autoPlayCurve: Curves.easeInOutCubic,
+      ),
+      itemBuilder: (context, index, realIndex) {
+        final item = items[index];
+        return _buildCarouselCard(context, item);
+      },
+    );
+  }
+
+  Widget _buildCarouselCard(BuildContext context, RecommendationItem item) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 6),
+      decoration: _frostCard(),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Stack(
+          children: [
+            // Background image with fallback
+            Positioned.fill(
+              child: item.coverUrl.isNotEmpty
+                  ? Image.network(
+                      item.coverUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [Color(0xFFF9F6FF), Color(0xFFF3EEFF)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                          ),
+                          child: const Center(
+                            child: Icon(
+                              Icons.book_outlined,
+                              color: _muted,
+                              size: 48,
+                            ),
+                          ),
+                        );
+                      },
+                    )
+                  : Container(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Color(0xFFF9F6FF), Color(0xFFF3EEFF)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          Icons.book_outlined,
+                          color: _muted,
+                          size: 48,
+                        ),
+                      ),
+                    ),
+            ),
+            // Gradient overlay for text readability
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.black.withOpacity(0.1),
+                      Colors.black.withOpacity(0.6),
+                    ],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                ),
+              ),
+            ),
+            // Badge
+            Positioned(
+              top: 12,
+              left: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: _accent.withOpacity(0.9),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Text(
+                  'Recommended',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+            // Text content
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      item.title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black45,
+                            blurRadius: 4,
+                          ),
+                        ],
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      item.author,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black45,
+                            blurRadius: 4,
+                          ),
+                        ],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: const [
+                        Icon(
+                          Icons.book_outlined,
+                          color: Colors.white70,
+                          size: 14,
+                        ),
+                        SizedBox(width: 4),
+                        Text(
+                          'Tap for details',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class HomePage extends StatefulWidget {
   final bool useAltBackground;
@@ -63,6 +286,34 @@ class _HomePageState extends State<HomePage> {
   // Add: refresh indicator key
   final GlobalKey<RefreshIndicatorState> _refreshKey =
       GlobalKey<RefreshIndicatorState>();
+
+  // TODO: Replace with actual backend data when available
+  List<RecommendationItem> _recommendations = [
+    const RecommendationItem(
+      id: '1',
+      title: 'The Great Gatsby',
+      author: 'F. Scott Fitzgerald',
+      coverUrl: '',
+    ),
+    const RecommendationItem(
+      id: '2',
+      title: 'To Kill a Mockingbird',
+      author: 'Harper Lee',
+      coverUrl: '',
+    ),
+    const RecommendationItem(
+      id: '3',
+      title: '1984',
+      author: 'George Orwell',
+      coverUrl: '',
+    ),
+    const RecommendationItem(
+      id: '4',
+      title: 'Pride and Prejudice',
+      author: 'Jane Austen',
+      coverUrl: '',
+    ),
+  ];
 
   // Cache whether the backend exposes the /book-suggestions/ endpoint.
   // null = unknown, true = available, false = not available (use fallback).
@@ -681,6 +932,19 @@ class _HomePageState extends State<HomePage> {
   }
 
   List<Map<String, String>> get _filteredBooks => _issuedBooks;
+
+  // Build recommendations section with carousel
+  Widget _buildRecommendationsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 18),
+        const _SectionHeader(text: 'Book recommended for you'),
+        const SizedBox(height: 14),
+        RecommendationCarousel(items: _recommendations),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1379,55 +1643,8 @@ class _HomePageState extends State<HomePage> {
                                 ),
                         ),
                       ),
-                      // Recommendations
-                      const SizedBox(height: 18),
-                      const _SectionHeader(text: 'Book recommended for you'),
-                      const SizedBox(height: 14),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Container(
-                                height: 200,
-                                decoration: _frostCard(),
-                                child: _bookIcon(),
-                              ),
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Container(
-                                height: 200,
-                                decoration: _frostCard(),
-                                child: _bookIcon(),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Container(
-                                height: 200,
-                                decoration: _frostCard(),
-                                child: _bookIcon(),
-                              ),
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Container(
-                                height: 200,
-                                decoration: _frostCard(),
-                                child: _bookIcon(),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      // Recommendations Carousel
+                      _buildRecommendationsSection(),
                       const SizedBox(height: 80),
                     ],
                   ),
